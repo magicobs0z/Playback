@@ -8,6 +8,7 @@
 #include "playback/functions/record/ChunkMutationBarrier.h"
 #include "playback/functions/record/Recorder.h"
 #include "playback/functions/replay/ReplaySession.h"
+#include "playback/functions/telemetry/OreUiSelectionHooks.h"
 #include "playback/functions/tick/ClientTickHooks.h"
 #include "playback/screen/MainMenuHooks.h"
 
@@ -85,6 +86,9 @@ bool Playback::hook() {
         screen::hookMainMenu(false);
         return false;
     }
+    if (!functions::hookOreUiSelectionTelemetry(true)) {
+        getSelf().getLogger().warn("OreUI selection telemetry is unavailable; replay functionality will continue without it");
+    }
 
     getEventListeners().emplace(
         ll::event::EventBus::getInstance().emplaceListener<ll::event::ClientCommandRegisterEvent>([this](auto&&) {
@@ -128,6 +132,7 @@ bool Playback::hook() {
 
 bool Playback::unhook() {
     if (!impl->mRuntimeInstalled) return true;
+    if (!functions::hookOreUiSelectionTelemetry(false)) return false;
     if (!functions::hookClientTick(false)) return false;
     if (!functions::hookNetwork(false)) {
         bool tickRestored = functions::hookClientTick(true);
