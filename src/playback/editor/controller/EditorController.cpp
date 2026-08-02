@@ -106,6 +106,9 @@ void EditorController::applyEditorAction(EditorAction const& action) {
     case EditorActionType::DeleteCameraKeyframe:
         mCommandStack.push(CommandFactory::createDeleteCameraKeyframe(action.id, action.secondaryId), mProject);
         break;
+    case EditorActionType::SetKeyframeEasing:
+        mCommandStack.push(CommandFactory::createSetKeyframeEasing(action.id, action.secondaryId, static_cast<editing::model::EasingType>(action.kind)), mProject);
+        break;
     case EditorActionType::DeleteCamera:
         mCommandStack.push(CommandFactory::createDeleteCamera(action.id), mProject);
         break;
@@ -117,6 +120,9 @@ void EditorController::applyEditorAction(EditorAction const& action) {
         break;
     case EditorActionType::CreateBindingCamera:
         mCommandStack.push(CommandFactory::createCreateBindingCamera(action.id, action.name), mProject);
+        break;
+    case EditorActionType::SetSubActorDetails:
+        mCommandStack.push(CommandFactory::createSetSubActorDetails(action.id, action.details), mProject);
         break;
     default:
         break;

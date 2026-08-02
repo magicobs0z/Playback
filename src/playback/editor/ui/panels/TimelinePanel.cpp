@@ -93,7 +93,45 @@ void TimelinePanel::draw() {
     if (ImGui::Button("Redo", {42, 28})) submitEdit({EditorActionType::RedoEditorEdit});
     ImGui::EndDisabled();
     ImGui::SameLine();
-    auto const* selectedCamera = editor.selection().getAs<editing::model::SelectedCamera>();
+    auto const& selection = editor.selection();
+    bool const splitWorld = selection.getAs<editing::model::SelectedWorldActor>() || selection.getAs<editing::model::SelectedWorldActorSegment>();
+    bool const canSplit = splitWorld || selection.getAs<editing::model::SelectedSequence>() || selection.getAs<editing::model::SelectedSequenceSegment>();
+    ImGui::BeginDisabled(!canSplit);
+    if (ImGui::Button("Split", {52, 28})) {
+        EditorAction action{splitWorld ? EditorActionType::SplitWorldActor : EditorActionType::SplitSequence};
+        action.tick = state.currentTick;
+        submitEdit(std::move(action));
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    bool const canDelete = selection.getAs<editing::model::SelectedSequenceSegment>()
+        || selection.getAs<editing::model::SelectedWorldActorSegment>()
+        || selection.getAs<editing::model::SelectedCamera>()
+        || selection.getAs<editing::model::SelectedKeyframe>();
+    ImGui::BeginDisabled(!canDelete);
+    if (ImGui::Button("Del", {44, 28})) {
+        if (auto const* sequenceSegmentSel = selection.getAs<editing::model::SelectedSequenceSegment>()) {
+            EditorAction action{EditorActionType::DeleteSequenceSegment};
+            action.id = sequenceSegmentSel->segmentId;
+            submitEdit(std::move(action));
+        } else if (auto const* worldSegmentSel = selection.getAs<editing::model::SelectedWorldActorSegment>()) {
+            EditorAction action{EditorActionType::RippleDeleteWorldActorSegment};
+            action.id = worldSegmentSel->segmentId;
+            submitEdit(std::move(action));
+        } else if (auto const* cameraSel = selection.getAs<editing::model::SelectedCamera>()) {
+            EditorAction action{EditorActionType::DeleteCamera};
+            action.id = cameraSel->cameraId;
+            submitEdit(std::move(action));
+        } else if (auto const* keyframeSel = selection.getAs<editing::model::SelectedKeyframe>()) {
+            EditorAction action{EditorActionType::DeleteCameraKeyframe};
+            action.id = keyframeSel->trackId;
+            action.secondaryId = keyframeSel->keyframeId;
+            submitEdit(std::move(action));
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    auto const* selectedCamera = selection.getAs<editing::model::SelectedCamera>();
     ImGui::BeginDisabled(selectedCamera == nullptr);
     if (ImGui::Button("+ Key", {50, 28})) {
         EditorAction action{EditorActionType::AddCameraKeyframe};
@@ -147,7 +185,25 @@ void TimelinePanel::draw() {
     std::snprintf(search, sizeof(search), "%s", mTrackSearch.c_str());
     ImGui::SetNextItemWidth(listWidth - 8.0f);
     if (ImGui::InputTextWithHint("##timeline-search", "Search cameras", search, sizeof(search))) mTrackSearch = search;
+    auto groupHeader = [](char const* label, bool expanded, bool* toggle) {
+        char const* arrow = expanded ? "v" : ">";
+        std::string const text = std::string(arrow) + "  " + label;
+        if (ImGui::Selectable(text.c_str(), false)) {
+            if (toggle) *toggle = !*toggle;
+            return true;
+        }
+        return false;
+    };
+    bool camerasHeaderShown = false;
+    bool markersHeaderShown = false;
     for (auto const& row : mTrackTree.rows()) {
+        if (row.kind == editing::model::TrackRowKind::Camera && !camerasHeaderShown) {
+            groupHeader(("Cameras (" + std::to_string(project->cameras.size()) + ")").c_str(), mCamerasExpanded, &mCamerasExpanded);
+            camerasHeaderShown = true;
+        } else if (row.kind == editing::model::TrackRowKind::Marker && !markersHeaderShown) {
+            groupHeader("Markers", mMarkersExpanded, &mMarkersExpanded);
+            markersHeaderShown = true;
+        }
         bool selected = (row.kind == editing::model::TrackRowKind::Sequence && editor.selection().getAs<editing::model::SelectedSequence>())
             || (row.kind == editing::model::TrackRowKind::WorldActor && editor.selection().getAs<editing::model::SelectedWorldActor>())
             || (row.kind == editing::model::TrackRowKind::Camera && editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7));
@@ -164,6 +220,8 @@ void TimelinePanel::draw() {
         }
         if (row.locked) { ImGui::SameLine(); ImGui::TextDisabled("LOCK"); }
     }
+    if (!camerasHeaderShown) groupHeader(("Cameras (" + std::to_string(project->cameras.size()) + ")").c_str(), mCamerasExpanded, &mCamerasExpanded);
+    if (!markersHeaderShown) groupHeader("Markers", mMarkersExpanded, &mMarkersExpanded);
     ImGui::EndChild();
 
     drawList->AddRectFilled({canvasLeft, workTop}, {fullMax.x, workBottom}, IM_COL32(24, 25, 30, 255));
@@ -193,6 +251,7 @@ void TimelinePanel::draw() {
     };
     auto tickFromMouse = [&] { return std::clamp(static_cast<int>((ImGui::GetMousePos().x - canvasLeft + mScrollX) / mPixelsPerTick), 0, state.totalTicks); };
     float y = bodyTop + 2.0f;
+    bool clickConsumed = false;
     for (auto const& row : mTrackTree.rows()) {
         float const rowBottom = y + row.height;
         drawList->AddRectFilled({canvasLeft, y}, {fullMax.x, rowBottom}, IM_COL32(31, 32, 38, 255));
@@ -205,6 +264,7 @@ void TimelinePanel::draw() {
                 drawList->AddRect(minimum, maximum, selected ? IM_COL32(240, 192, 32, 255) : IM_COL32(100, 160, 225, 255), 3.0f);
                 drawList->AddText({minimum.x + 5.0f, minimum.y + 6.0f}, IM_COL32(245, 245, 247, 255), segmentLabel(segment));
                 if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && contains(minimum, maximum, ImGui::GetMousePos())) {
+                    clickConsumed = true;
                     editor.selection().select(editing::model::SelectedSequenceSegment{segment.id});
                     if (!segment.locked && (std::abs(ImGui::GetMousePos().x - minimum.x) < 8.0f || std::abs(ImGui::GetMousePos().x - maximum.x) < 8.0f)) {
                         mDraggingSegmentId = segment.id;
@@ -226,6 +286,7 @@ void TimelinePanel::draw() {
                 std::snprintf(label, sizeof(label), "%.2fx", segment.speed);
                 drawList->AddText({minimum.x + 5.0f, minimum.y + 6.0f}, IM_COL32(245, 245, 247, 255), label);
                 if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && contains(minimum, maximum, ImGui::GetMousePos())) {
+                    clickConsumed = true;
                     editor.selection().select(editing::model::SelectedWorldActorSegment{segment.id});
                     if (!segment.locked && (std::abs(ImGui::GetMousePos().x - minimum.x) < 8.0f || std::abs(ImGui::GetMousePos().x - maximum.x) < 8.0f)) {
                         mDraggingSegmentId = segment.id;
@@ -241,17 +302,29 @@ void TimelinePanel::draw() {
             for (auto const& key : camera.keys) {
                 float x = canvasLeft + key.tick * mPixelsPerTick - mScrollX;
                 drawList->AddCircleFilled({x, (y + rowBottom) * 0.5f}, 5.0f, IM_COL32(128, 192, 240, 255));
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 7.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) editor.selection().select(editing::model::SelectedKeyframe{camera.id, key.id});
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 7.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) {
+                    clickConsumed = true;
+                    editor.selection().select(editing::model::SelectedKeyframe{camera.id, key.id});
+                }
             }
         } else if (row.kind == editing::model::TrackRowKind::Marker) {
             for (auto const& marker : project->markers) {
                 float x = canvasLeft + marker.tick * mPixelsPerTick - mScrollX;
                 drawList->AddLine({x, y}, {x, rowBottom}, IM_COL32(240, 192, 32, 255));
                 drawList->AddText({x + 4.0f, y + 2.0f}, IM_COL32(240, 210, 100, 255), marker.label.c_str());
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 6.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) editor.selection().select(editing::model::SelectedMarker{marker.id});
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 6.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) {
+                    clickConsumed = true;
+                    editor.selection().select(editing::model::SelectedMarker{marker.id});
+                }
             }
         }
         y = rowBottom + 2.0f;
+    }
+
+    if (!clickConsumed && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+        && ImGui::GetMousePos().x >= canvasLeft && ImGui::GetMousePos().x <= fullMax.x
+        && ImGui::GetMousePos().y >= bodyTop && ImGui::GetMousePos().y < workBottom - (maxScroll > 0.0f ? 18.0f : 0.0f)) {
+        submitSeek(tickFromMouse());
     }
 
     if (!mDraggingSegmentId.empty()) {
@@ -301,11 +374,15 @@ void TimelinePanel::draw() {
     ImGui::SameLine();
     if (ImGui::Button(">|", {32, 28})) submitEdit({EditorActionType::SkipToEnd});
     ImGui::SameLine();
+    if (ImGui::Button("-", {24, 28})) submitEdit({EditorActionType::DecreaseSpeed});
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.2fx", state.playbackSpeed);
+    ImGui::SameLine();
+    if (ImGui::Button("+", {24, 28})) submitEdit({EditorActionType::IncreaseSpeed});
+    ImGui::SameLine();
     ImGui::BeginDisabled();
     ImGui::Button("Loop", {48, 28});
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled("%.2fx", state.playbackSpeed);
     ImGui::EndChild();
 }
 

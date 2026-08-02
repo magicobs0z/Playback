@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,7 @@ enum class EditorActionType {
     AddCameraKeyframe,
     MoveCameraKeyframe,
     DeleteCameraKeyframe,
+    SetKeyframeEasing,
     DeleteCamera,
     UnbindCamera,
     SetCameraKind,
@@ -55,6 +57,7 @@ struct EditorAction {
     float                    speed{};
     int                      kind{};
     std::vector<std::string> replayIds;
+    std::map<std::string, std::string> details;
 };
 
 } // namespace playback::editor
