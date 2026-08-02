@@ -16,6 +16,8 @@
 | UI-8 | 关键帧支持 easing 下拉（Linear/EaseIn/EaseOut/EaseInOut）、tick 移动、删除 | DetailsPanel |
 | UI-9 | 无后端能力（Marker 删除、关键帧值、绑定参数等）显示禁用态/只读，不伪造本地业务状态 | DetailsPanel |
 | UI-10 | 所有可提交按钮走命令链；拖动类字段提交时机为释放/失焦，避免每帧压 Undo 栈 | 全局 |
+| UI-11 | 时间轴采用紧凑扁平 Sequencer：透明图标按钮仅悬停变白；底部左侧传输控制、右侧独立水平滚动条；缩放位于顶部左侧 | TimelinePanel |
+| UI-12 | 一级轨道只显示 Camera Sequence、World Actor、Cameras；Sequence 为灰白、World Actor 为低饱和绿、Camera 为低饱和紫；蓝色 Add 与圆角搜索框并列 | TimelinePanel |
 
 ## 二、架构（Architecture）
 

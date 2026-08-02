@@ -16,6 +16,8 @@ compile_commands.json
 # FFmpeg build products and sources (regenerate via scripts/build-ffmpeg/build-ffmpeg.ps1)
 third_party/ffmpeg/
 third_party/ffmpeg-src/
+scripts/build-ffmpeg/
+tests/
 
 # Shared repository automation should stay tracked
 
