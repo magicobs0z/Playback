@@ -196,7 +196,7 @@ void TimelinePanel::draw() {
 
     drawList->AddRectFilled({fullMin.x, workTop}, {fullMin.x + listWidth, workBottom}, kSidebarBackground);
     ImGui::SetCursorScreenPos({fullMin.x, workTop});
-    ImGui::BeginChild("##TimelineTrackList", {listWidth, workBottom - workTop}, false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("##TimelineTrackControls", {listWidth, kRulerHeight}, false, ImGuiWindowFlags_NoScrollbar);
     char search[128]{};
     std::snprintf(search, sizeof(search), "%s", mTrackSearch.c_str());
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(28, 122, 190, 255));
@@ -212,36 +212,34 @@ void TimelinePanel::draw() {
     ImGui::SetNextItemWidth(listWidth - 58.0f);
     if (ImGui::InputTextWithHint("##timeline-search", "Search Tracks", search, sizeof(search))) mTrackSearch = search;
     ImGui::PopStyleVar();
-    auto groupHeader = [](char const* label, bool expanded, bool* toggle) {
-        char const* arrow = expanded ? "v" : ">";
-        std::string const text = std::string(arrow) + "  " + label;
-        if (ImGui::Selectable(text.c_str(), false)) {
-            if (toggle) *toggle = !*toggle;
-            return true;
-        }
-        return false;
-    };
-    bool camerasHeaderShown = false;
+    ImGui::EndChild();
+    ImGui::SetCursorScreenPos({fullMin.x, bodyTop + 2.0f});
+    ImGui::BeginChild("##TimelineTrackList", {listWidth, workBottom - bodyTop - 2.0f}, false, ImGuiWindowFlags_NoScrollbar);
+    float listY = bodyTop + 2.0f;
     for (auto const& row : mTrackTree.rows()) {
-        if (row.kind == editing::model::TrackRowKind::Camera && !camerasHeaderShown) {
-            groupHeader(("Cameras (" + std::to_string(project->cameras.size()) + ")  +").c_str(), mCamerasExpanded, &mCamerasExpanded);
-            camerasHeaderShown = true;
-        }
+        float const rowBottom = listY + row.height;
         bool selected = (row.kind == editing::model::TrackRowKind::Sequence && editor.selection().getAs<editing::model::SelectedSequence>())
             || (row.kind == editing::model::TrackRowKind::WorldActor && editor.selection().getAs<editing::model::SelectedWorldActor>())
             || (row.kind == editing::model::TrackRowKind::Camera && editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7));
+        ImGui::SetCursorScreenPos({fullMin.x, listY});
+        ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(58, 79, 111, 255));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(66, 89, 124, 255));
         if (row.kind == editing::model::TrackRowKind::Camera) {
             ImGui::PushID(row.id.c_str());
-            if (ImGui::Selectable((std::string("C  ") + row.name).c_str(), selected)) editor.selection().select(editing::model::SelectedCamera{row.id.substr(7)});
+            std::string label = "    " + row.name;
+            if (row.cameraIndex == 0) label = std::string(mCamerasExpanded ? "v  Cameras (" : ">  Cameras (") + std::to_string(project->cameras.size()) + ")   +    " + row.name;
+            if (ImGui::Selectable(label.c_str(), selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedCamera{row.id.substr(7)});
+            if (row.cameraIndex == 0 && ImGui::IsItemClicked(ImGuiMouseButton_Left) && ImGui::GetMousePos().x < fullMin.x + 100.0f) mCamerasExpanded = !mCamerasExpanded;
             ImGui::PopID();
         } else if (row.kind == editing::model::TrackRowKind::Sequence) {
-            if (ImGui::Selectable("O  Camera Sequence", selected)) editor.selection().select(editing::model::SelectedSequence{});
+            if (ImGui::Selectable("O  Camera Sequence", selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedSequence{});
         } else if (row.kind == editing::model::TrackRowKind::WorldActor) {
-            if (ImGui::Selectable("O  World Actor", selected)) editor.selection().select(editing::model::SelectedWorldActor{});
+            if (ImGui::Selectable("O  World Actor", selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedWorldActor{});
         }
-        if (row.locked) { ImGui::SameLine(); ImGui::TextDisabled("LOCK"); }
+        ImGui::PopStyleColor(2);
+        if (row.locked) drawList->AddText({fullMin.x + listWidth - 36.0f, listY + 5.0f}, IM_COL32(140, 140, 140, 255), "LOCK");
+        listY = rowBottom + 2.0f;
     }
-    if (!camerasHeaderShown) groupHeader(("Cameras (" + std::to_string(project->cameras.size()) + ")  +").c_str(), mCamerasExpanded, &mCamerasExpanded);
     ImGui::EndChild();
 
     drawList->AddRectFilled({canvasLeft, workTop}, {fullMax.x, workBottom}, kBackground);
@@ -401,15 +399,15 @@ void TimelinePanel::draw() {
     }
     ImGui::SetCursorScreenPos({fullMin.x, workBottom});
     ImGui::BeginChild("##TimelineTransport", {listWidth, kTransportHeight}, false, ImGuiWindowFlags_NoScrollbar);
-    if (iconButton("transport-start", ICON_BACK, "Skip to start")) submitEdit({EditorActionType::SkipToStart});
+    if (iconButton("transport-start", ICON_SKIP_BACK, "Skip to start")) submitEdit({EditorActionType::SkipToStart});
     sameIcon();
-    if (iconButton("transport-prev", "<<", "Previous frame")) { EditorAction action{EditorActionType::Seek}; action.tick = std::max(0, state.currentTick - 1); submitEdit(std::move(action)); }
+    if (iconButton("transport-prev", ICON_CHEVRONS_LEFT, "Previous frame")) { EditorAction action{EditorActionType::Seek}; action.tick = std::max(0, state.currentTick - 1); submitEdit(std::move(action)); }
     sameIcon();
     if (iconButton("transport-play", state.paused ? ICON_PLAY : ICON_PAUSE, state.paused ? "Play" : "Pause")) submitEdit({EditorActionType::TogglePause});
     sameIcon();
-    if (iconButton("transport-next", ">>", "Next frame")) { EditorAction action{EditorActionType::Seek}; action.tick = std::min(state.totalTicks, state.currentTick + 1); submitEdit(std::move(action)); }
+    if (iconButton("transport-next", ICON_CHEVRONS_RIGHT, "Next frame")) { EditorAction action{EditorActionType::Seek}; action.tick = std::min(state.totalTicks, state.currentTick + 1); submitEdit(std::move(action)); }
     sameIcon();
-    if (iconButton("transport-end", ICON_PLAY, "Skip to end")) submitEdit({EditorActionType::SkipToEnd});
+    if (iconButton("transport-end", ICON_SKIP_FORWARD, "Skip to end")) submitEdit({EditorActionType::SkipToEnd});
     sameIcon();
     if (iconButton("speed-down", "-", "Decrease speed")) submitEdit({EditorActionType::DecreaseSpeed});
     ImGui::SameLine(0.0f, 2.0f);
