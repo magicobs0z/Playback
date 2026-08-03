@@ -14,6 +14,7 @@
 #include "mc/client/player/LocalPlayer.h"
 #include "mc/deps/core/utility/ReadOnlyBinaryStream.h"
 #include "mc/deps/ecs/gamerefs_entity/EntityContext.h"
+#include "mc/deps/minecraft_camera/components/CameraInstructionComponent.h"
 #include "mc/deps/vanilla_components/OnGroundFlagComponent.h"
 #include "mc/entity/components/ActorHeadRotationComponent.h"
 #include "mc/entity/components/LocalPlayerDimensionWaitComponent.h"
@@ -106,7 +107,7 @@ void reportCameraPreviewDebug(char const* phase, int tick, float x, float y, flo
     InternetCloseHandle(internet);
 }
 
-void reportCameraPreviewDebugForce(char const* phase, int tick, Player const& player) {
+void reportCameraPreviewDebugForce(char const* phase, int tick, Actor const& player) {
     auto const& position = player.getPosition();
     auto const& rotation = player.getRotation();
     auto const body = std::string{"{\"sessionId\":\"camera-preview-jitter\",\"runId\":\"pre-fix\",\"hypothesisId\":\"B\",\"location\":\"ReplaySession\",\"msg\":\"[DEBUG] camera-preview "} + phase + "\",\"data\":{\"tick\":" + std::to_string(tick) + ",\"x\":" + std::to_string(position.x) + ",\"y\":" + std::to_string(position.y) + ",\"z\":" + std::to_string(position.z) + ",\"yaw\":" + std::to_string(rotation.y) + ",\"pitch\":" + std::to_string(rotation.x) + "}}";
@@ -409,13 +410,19 @@ bool ReplaySession::setPaused(bool paused) {
 }
 
 bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov) {
-    if (!mActive || !mReplayWorldJoined || !mReplayPlayer) return false;
+    if (!mActive || !mReplayWorldJoined) return false;
     // #region debug-point A:before-camera-override
     reportCameraPreviewDebug("before-override", mCurrentTick, x, y, z, yaw, pitch);
     // #endregion
-    mReplayPlayer->moveTo(Vec3{x, y, z}, Vec2{pitch, yaw});
+    auto client = ll::service::getClientInstance();
+    if (!client) return false;
+    auto* cameraActor = client->getCameraActor();
+    if (!cameraActor) return false;
+    auto& instruction = cameraActor->getEntityContext().getOrAddComponent<MinecraftCamera::CameraInstructionComponent>();
+    instruction.mPos = Vec3{x, y, z};
+    instruction.mRot = Vec2{pitch, yaw};
     // #region debug-point A:after-camera-override
-    reportCameraPreviewDebugForce("after-override", mCurrentTick, *mReplayPlayer);
+    reportCameraPreviewDebugForce("after-override", mCurrentTick, *cameraActor);
     // #endregion
     (void)fov;
     return true;
@@ -427,7 +434,16 @@ void ReplaySession::reportEditorCameraDebug(Player const& player) const {
     // #endregion
 }
 
-void ReplaySession::clearEditorCameraOverride() {}
+void ReplaySession::clearEditorCameraOverride() {
+    auto client = ll::service::getClientInstance();
+    if (!client) return;
+    auto* cameraActor = client->getCameraActor();
+    if (!cameraActor) return;
+    auto instruction = cameraActor->getEntityContext().tryGetComponent<MinecraftCamera::CameraInstructionComponent>();
+    if (!instruction) return;
+    instruction->mPos = std::nullopt;
+    instruction->mRot = std::nullopt;
+}
 
 int ReplaySession::getTotalTicks() const { return std::max(0, mMeta.totalTicks); }
 
