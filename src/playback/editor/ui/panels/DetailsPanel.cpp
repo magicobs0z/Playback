@@ -177,8 +177,7 @@ void DetailsPanel::draw() {
 
     // ===== World Actor (overview + sub actor tree) =====
     if (selection.getAs<editing::model::SelectedWorldActor>()) {
-        ImGui::TextUnformatted("World Actor");
-        ImGui::Separator();
+        if (property::beginSection("World Actor")) {
         ImGui::Text("Name: %s", project->worldActor.name.empty() ? "(untitled)" : project->worldActor.name.c_str());
         ImGui::Text("Total: %s", formatTick(project->worldActor.totalTicks).c_str());
         ImGui::Text("Segments: %zu", project->worldActor.segments.size());
@@ -187,8 +186,8 @@ void DetailsPanel::draw() {
                 editor.selection().select(editing::model::SelectedWorldActorSegment{segment.id});
             }
         }
-        ImGui::Separator();
-        ImGui::TextUnformatted("Sub Actors");
+        property::separator();
+        if (property::beginSection("Sub Actors")) {
         static constexpr std::array<editing::model::SubActorCategory, 4> categories{
             editing::model::SubActorCategory::Default,
             editing::model::SubActorCategory::Players,
@@ -215,6 +214,10 @@ void DetailsPanel::draw() {
                 }
             }
         }
+        property::endSection();
+        }
+        property::endSection();
+        }
         return;
     }
 
@@ -227,8 +230,7 @@ void DetailsPanel::draw() {
         }
         bool const isFirst = &project->worldActor.segments.front() == segment;
         bool const isLast = &project->worldActor.segments.back() == segment;
-        ImGui::TextUnformatted("World Actor Segment");
-        ImGui::Separator();
+        if (property::beginSection("World Actor Segment")) {
         ImGui::Text("Range: %s - %s", formatTick(segment->startTick).c_str(), formatTick(segment->endTick).c_str());
         ImGui::Text("Duration: %d ticks", segment->endTick - segment->startTick);
         ImGui::Text("Source Tick: %d", segment->sourceTick);
@@ -260,18 +262,20 @@ void DetailsPanel::draw() {
             action.speed = speed;
             submit(std::move(action));
         }
-        if (ImGui::Button("Split at Playhead", {-1.0f, 0.0f})) {
+        if (property::actionButton("Split at Playhead")) {
             EditorAction action{EditorActionType::SplitWorldActor};
             action.tick = state.currentTick;
             submit(std::move(action));
         }
-        if (ImGui::Button("Ripple Delete", {-1.0f, 0.0f})) {
+        if (property::actionButton("Ripple Delete")) {
             EditorAction action{EditorActionType::RippleDeleteWorldActorSegment};
             action.id = segment->id;
             submit(std::move(action));
         }
         ImGui::EndDisabled();
         if (segment->locked) ImGui::TextDisabled("Segment is locked.");
+        property::endSection();
+        }
         return;
     }
 
@@ -282,8 +286,7 @@ void DetailsPanel::draw() {
             ImGui::TextDisabled("Sub actor no longer exists.");
             return;
         }
-        ImGui::TextUnformatted("Sub Actor");
-        ImGui::Separator();
+        if (property::beginSection("Sub Actor")) {
         ImGui::Text("Name: %s", actor->name.empty() ? actor->id.c_str() : actor->name.c_str());
         ImGui::Text("Category: %s", categoryName(actor->category));
         ImGui::Text("Position: (%.1f, %.1f, %.1f)", actor->position.x, actor->position.y, actor->position.z);
@@ -297,9 +300,9 @@ void DetailsPanel::draw() {
                 ImGui::BulletText("%s", camera ? camera->name.c_str() : cameraId.c_str());
             }
         }
-        ImGui::Separator();
+        property::separator();
         if (!actor->agentDetails.empty()) {
-            ImGui::TextUnformatted("Agent Details");
+            if (property::beginSection("Agent Details")) {
             auto updated = actor->agentDetails;
             bool edited = false;
             for (auto& [key, value] : updated) {
@@ -315,12 +318,13 @@ void DetailsPanel::draw() {
                 action.details = std::move(updated);
                 submit(std::move(action));
             }
-            ImGui::Separator();
+            property::endSection();
+        }
         }
         static char newDetailKey[64]{};
         ImGui::SetNextItemWidth(-1.0f);
         ImGui::InputTextWithHint("##agent-new-key", "New detail field name", newDetailKey, sizeof(newDetailKey));
-        if (ImGui::Button("Add Detail Field", {-1.0f, 0.0f}) && newDetailKey[0] != '\0') {
+        if (property::actionButton("Add Detail Field") && newDetailKey[0] != '\0') {
             auto details = actor->agentDetails;
             details[newDetailKey] = "";
             EditorAction action{EditorActionType::SetSubActorDetails};
@@ -330,11 +334,13 @@ void DetailsPanel::draw() {
             newDetailKey[0] = '\0';
         }
         ImGui::Spacing();
-        if (ImGui::Button("Create Binding Camera", {-1.0f, 0.0f})) {
+        if (property::actionButton("Create Binding Camera")) {
             EditorAction action{EditorActionType::CreateBindingCamera};
             action.id = actor->id;
             action.name = actor->name + " Camera";
             submit(std::move(action));
+        }
+        property::endSection();
         }
         return;
     }
@@ -346,8 +352,7 @@ void DetailsPanel::draw() {
             ImGui::TextDisabled("Camera no longer exists.");
             return;
         }
-        ImGui::TextUnformatted("Camera");
-        ImGui::Separator();
+        if (property::beginSection("Camera")) {
         ImGui::Text("Name: %s", camera->name.c_str());
         ImGui::Text("Keyframes: %zu", camera->keys.size());
         ImGui::BeginDisabled(camera->locked);
@@ -369,7 +374,7 @@ void DetailsPanel::draw() {
             ImGui::Text("Bound to: %s", actor ? actor->name.c_str() : camera->bindingEntityUuid.c_str());
             ImGui::Text("Binding Mode: %d", camera->bindingMode);
             ImGui::Text("Damping: %.2f", camera->bindingDamping);
-            if (ImGui::Button("Unbind Camera", {-1.0f, 0.0f})) {
+            if (property::actionButton("Unbind Camera")) {
                 EditorAction action{EditorActionType::UnbindCamera};
                 action.id = camera->id;
                 submit(std::move(action));
@@ -407,8 +412,8 @@ void DetailsPanel::draw() {
         if (camera->shake) {
             ImGui::Text("Shake: %d - %d", camera->shake->startTick, camera->shake->endTick);
         }
-        ImGui::Separator();
-        if (ImGui::Button("Add Keyframe at Playhead", {-1.0f, 0.0f})) {
+        property::separator();
+        if (property::actionButton("Add Keyframe at Playhead")) {
             EditorAction action{EditorActionType::AddCameraKeyframe};
             action.id = camera->id;
             action.tick = state.currentTick;
@@ -417,14 +422,16 @@ void DetailsPanel::draw() {
         for (auto const& key : camera->keys) {
             if (ImGui::Selectable(("Tick " + std::to_string(key.tick)).c_str())) editor.selection().select(editing::model::SelectedKeyframe{camera->id, key.id});
         }
-        ImGui::Separator();
-        if (ImGui::Button("Delete Camera", {-1.0f, 0.0f})) {
+        property::separator();
+        if (property::actionButton("Delete Camera")) {
             EditorAction action{EditorActionType::DeleteCamera};
             action.id = camera->id;
             submit(std::move(action));
         }
         ImGui::EndDisabled();
         if (camera->locked) ImGui::TextDisabled("Camera is locked.");
+        property::endSection();
+        }
         return;
     }
 
@@ -436,8 +443,7 @@ void DetailsPanel::draw() {
             ImGui::TextDisabled("Keyframe no longer exists.");
             return;
         }
-        ImGui::TextUnformatted("Camera Keyframe");
-        ImGui::Separator();
+        if (property::beginSection("Camera Keyframe")) {
         ImGui::Text("Camera: %s", camera->name.c_str());
         ImGui::BeginDisabled(camera->locked);
         int tick = key->tick;
@@ -465,7 +471,7 @@ void DetailsPanel::draw() {
             }
             ImGui::EndCombo();
         }
-        if (ImGui::Button("Delete Keyframe", {-1.0f, 0.0f})) {
+        if (property::actionButton("Delete Keyframe")) {
             EditorAction action{EditorActionType::DeleteCameraKeyframe};
             action.id = camera->id;
             action.secondaryId = key->id;
@@ -473,6 +479,8 @@ void DetailsPanel::draw() {
         }
         ImGui::EndDisabled();
         if (camera->locked) ImGui::TextDisabled("Camera is locked.");
+        property::endSection();
+        }
         return;
     }
 
@@ -483,18 +491,20 @@ void DetailsPanel::draw() {
             ImGui::TextDisabled("Marker no longer exists.");
             return;
         }
-        ImGui::TextUnformatted("Marker");
-        ImGui::Separator();
+        if (property::beginSection("Marker")) {
         ImGui::Text("Label: %s", marker->label.c_str());
         ImGui::Text("Tick: %s", formatTick(marker->tick).c_str());
         ImGui::BeginDisabled();
-        if (ImGui::Button("Delete Marker", {-1.0f, 0.0f})) {}
+        if (property::actionButton("Delete Marker", false)) {}
         ImGui::EndDisabled();
         ImGui::TextDisabled("Marker editing is not yet wired to the backend.");
+        property::endSection();
+        }
         return;
     }
 
     // ===== Empty state =====
+    if (property::beginSection("Replay Overview")) {
     ImGui::TextDisabled("Select a sequence segment, world actor, camera, keyframe or marker.");
     ImGui::Spacing();
     ImGui::Text("Replay: %s", project->worldActor.name.empty() ? "(untitled)" : project->worldActor.name.c_str());
@@ -503,10 +513,12 @@ void DetailsPanel::draw() {
     ImGui::Text("Sequence segments: %zu", project->sequence.size());
     ImGui::Text("World actor segments: %zu", project->worldActor.segments.size());
     ImGui::Spacing();
-    if (ImGui::Button("Add Free Camera", {-1.0f, 0.0f})) {
+    if (property::actionButton("Add Free Camera")) {
         EditorAction action{EditorActionType::AddFreeCamera};
         action.name = "Camera " + std::to_string(project->cameras.size() + 1);
         submit(std::move(action));
+    }
+    property::endSection();
     }
 }
 

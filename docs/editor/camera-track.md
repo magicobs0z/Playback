@@ -195,6 +195,8 @@ CaptureCameraKeyframe(cameraId, timelineTick, freeCameraState)
 | 删除关键帧 | `DeleteKeyframe` | 删除目标帧；允许 Keyframe Camera 暂时为空 |
 | 改关键帧字段 | `SetCameraKeyframeState` | 修改 position、rotation 或 fov |
 | 改缓动 | `SetKeyframeEasing` | 修改区间起点的 easing 与控制点 |
+| 应用运动预设 | `ApplyCameraTransitionPreset` | 写入当前帧离开区间的路径、缓动、朝向与 FOV 过渡参数 |
+| 微调运动段 | `SetCameraMotionSegment` | 修改当前帧离开区间的路径类型、3D 控制点或镜头参数 |
 | 创建绑定摄影机 | `CreateBindingCamera` | 新增绑定指定子 Actor 的 Camera 实体 |
 | 删除摄影机 | `DeleteCamera` | 删除 Camera 并把所有引用它的序列段 `cameraId` 清空 |
 
@@ -205,10 +207,45 @@ Timeline 的 Camera 行绘制关键帧菱形；当前帧和已选帧使用高亮
 | 选择项 | 内容 |
 |---|---|
 | Camera | 名称、kind、绑定信息、锁定状态、关键帧列表、创建关键帧按钮 |
-| Keyframe | tick、position、rotation、fov、easing、CubicBezier 控制点 |
+| Keyframe | tick、position、rotation、fov、easing、时间 CubicBezier 控制点、离开该帧的运动预设与路径参数 |
 | SequenceSegment | 绑定 Camera 的下拉列表与未绑定警告 |
 
-### 2.5 确定性采样
+### 2.5 轨道运动段与内置过渡
+
+一个运动段是同一台 Keyframe Camera 中相邻关键帧 `[A, B]` 的过渡。它由 A 的 `outgoingMotion` 与 A 的时间 easing 完整定义；改变 B 的位置、旋转或 FOV 会立即更新该段终点，不需要额外同步数据。不同 Camera 的 SequenceSegment 切换始终是硬切，不属于运动段，也不使用下列预设。
+
+**空间路径规则：**
+
+| 路径 | 位置计算 | 适用场景 |
+|---|---|---|
+| Linear | `lerp(A.position, B.position, easedT)` | 默认、可预测的直线运动 |
+| CubicBezier | `bezier(A.position, A+outControl, B+inControl, B.position, easedT)` | 推近、绕行、跟拍等需要明确经过空间的镜头 |
+| AutoSmooth | 以相邻关键帧计算 Catmull-Rom 切线后取等价三次贝塞尔 | 连续多帧的平顺机位运动；端点退回 Linear |
+
+`CubicBezier` 的控制点以世界坐标偏移保存：`P1=A.position+A.outControl`、`P2=B.position+B.inControl`。这使关键帧整体移动时控制柄随关键帧移动，且不会因世界原点变化失效。控制点可在 Details 中输入数值；首版不在 Viewport 绘制或拖拽 gizmo。
+
+**镜头参数规则：**
+
+- 旋转默认按最短 yaw 路径与线性 pitch 插值，二者都使用 `easedT`。
+- `useLookAlongPath=true` 时，位置曲线一阶导数非零的采样点以运动切线计算目标 yaw/pitch；该自动朝向和 A/B 的旋转结果按 `easedT` 混合，端点仍精确等于 A/B 记录的 rotation。
+- FOV 默认以 `easedT` 在 A/B 的值之间插值。`fovPeakOffset!=0` 时，额外叠加 `sin(pi*easedT)*fovPeakOffset`，因此段首和段尾 FOV 不变，中段形成平滑推拉效果。
+- 所有预设只写 A 的运动段配置，不覆盖用户捕获的 A/B 位置、旋转与 FOV；用户可在应用后继续微调任意参数，`preset` 自动标记为 `Custom`。
+
+**首版内置过渡：**
+
+| 预设 | 路径与时间 | 朝向 / FOV | 配置结果 |
+|---|---|---|---|
+| 直线匀速 | Linear + Linear | 记录旋转与 FOV 线性插值 | 默认基础段 |
+| 电影缓动 | Linear + EaseInOut | 最短角旋转、FOV 缓入缓出 | 稳定的通用镜头 |
+| 弧线推近 | CubicBezier + EaseInOut | 正常旋转，`fovPeakOffset<0` | 依据 A→B 方向生成上扬前伸控制点 |
+| 弧线拉远 | CubicBezier + EaseInOut | 正常旋转，`fovPeakOffset>0` | 依据 A→B 方向生成后拉上扬控制点 |
+| 绕行跟拍 | CubicBezier + CubicBezier | `useLookAlongPath=true` | 依据 A→B 的水平法线生成侧向绕行控制点 |
+| 快速甩镜 | Linear + EaseOut | 快速旋转，FOV 轻微正峰值 | 不修改关键帧位置，仅强化转向感 |
+| 变焦推拉 | Linear + EaseInOut | 正常旋转，显著正或负 FOV 峰值 | 以 FOV 变化为主，不额外移动端点 |
+
+预设依据 A/B 的相对位移、距离和世界上方向自动生成控制点；若两点距离小于最小阈值，所有需要方向的预设安全退化为 Linear，并仍保留其时间缓动和 FOV 配置。预设绝不自动创建、移动或删除关键帧。
+
+### 2.6 确定性采样
 
 ```cpp
 CameraSample CameraSystem::sampleAt(
@@ -223,7 +260,7 @@ CameraSample CameraSystem::sampleAt(
 2. `timelineTick` 小于等于首帧 tick，返回首帧完整状态。
 3. `timelineTick` 大于等于末帧 tick，返回末帧完整状态。
 4. 使用 `std::upper_bound` 在 `O(log n)` 内定位相邻帧 `[A, B]`，计算 `t=(timelineTick-A.tick)/float(B.tick-A.tick)`。
-5. 按 A 的 easing 将 `t` 转为 `easedT`；position、pitch、fov 使用 `easedT` 插值，yaw 按最短角路径插值。
+5. 按 A 的 easing 将 `t` 转为 `easedT`；按 A 的 `outgoingMotion.pathType` 计算位置，旋转、自动朝向和 FOV 均使用同一 `easedT`。
 
 | Easing | `easedT` |
 |---|---|
@@ -235,7 +272,39 @@ CameraSample CameraSystem::sampleAt(
 
 贝塞尔反解使用固定次数的 Newton-Raphson 迭代，并在导数接近零时退回二分区间，避免平台或输入差异导致非确定结果。所有中间结果使用 `float`，不读取时钟、随机数或全局可变状态。
 
-### 2.6 预览与导出时间流
+对 AutoSmooth，内部切线仅从相邻关键帧位置按固定公式计算；首帧和末帧缺少一侧邻居时退化为 Linear。对 CubicBezier、AutoSmooth 和自动朝向，零长度导数或不可计算的方向必须退回记录的旋转，不能产生 NaN 或改变端点状态。
+
+### 2.7 预览状态机与导出时间流
+
+首版 Viewport 只显示最终相机画面，不渲染轨迹线、控制柄、方向箭头、关键帧 gizmo 或当前相机的辅助对象。路径编辑在 Timeline 与 Details 完成，用户通过拖动 playhead 或播放时间轴直接观察最终运动结果。
+
+| 状态 | 进入条件 | Viewport 相机来源 | 退出条件 |
+|---|---|---|---|
+| 序列预览 | 选中 Camera Sequence 或正常播放 | 当前 SequenceSegment 绑定 Camera 在 `timelineTick` 的采样 | 选中单台 Camera、开始自由机位编辑或无可用 Camera |
+| 单机预览 | 选中 Camera | 所选 Camera 在 `timelineTick` 的采样 | 选中 Sequence、其他 Camera 或开始自由机位编辑 |
+| 临时自由机位 | 用户在选中的 Keyframe Camera 上移动、旋转或缩放 | 当前自由相机实时状态，不写入 `keys` | 创建帧、播放、跳转 tick、改变选择或切换 SequenceSegment |
+| 无可用相机 | 当前段与回退列表均无法解析可采样 Camera | 保持安全默认视角并显示可恢复错误 | 添加/绑定可用 Camera |
+
+状态转换规则：
+
+1. 进入序列预览或单机预览时，系统使用 `CameraSystem::sampleAt` 同步自由相机至当前采样结果。
+2. 用户开始手动移动自由相机时进入临时自由机位；移动本身不提交命令、不改变关键帧，也不重新定义运动段。
+3. 在临时自由机位点击创建关键帧后，命令完成插入或覆盖，并以新的关键帧集重新采样当前 tick；自由相机仍可继续移动。
+4. 播放、暂停后 seek、拖动 playhead、切换选中 Camera、选中 Sequence 或跨越 SequenceSegment 边界时，临时状态立即丢弃，系统回到采样预览。
+5. 应用预设、编辑运动段或修改关键帧字段后，如果该段覆盖当前 tick，立即重采样；不需要额外保存或重启预览。
+
+导出不进入临时自由机位状态。每个导出帧都只从持久化的 `CameraEntity` 和 `timelineTick` 采样，确保导出结果不受编辑器中未落帧的手动移动影响。
+
+```cpp
+enum class CameraPreviewMode {
+    SequenceSample,
+    CameraSample,
+    FreeCameraPreview,
+    NoCamera
+};
+```
+
+### 2.8 预览与导出时间流
 
 ```cpp
 const int timelineTick = currentTimelineTick;
@@ -263,7 +332,7 @@ CameraSystem::applyToMCBE(sample);
 
 `applyToMCBE` 仅能在 `__playback_replay_world__` 的隔离编辑/渲染模式下执行；非隔离世界必须拒绝外部摄影机覆盖，避免影响在线世界或触发服务端校验。
 
-### 2.7 持久化与迁移
+### 2.9 持久化与迁移
 
 `.playback` ZIP 的 `metadata.json` 中，所有编辑数据位于 `PlaybackMeta.editor`。Camera 使用如下结构持久化：
 
@@ -290,7 +359,19 @@ CameraSystem::applyToMCBE(sample);
             "c1x": 0.42,
             "c1y": 0.0,
             "c2x": 0.58,
-            "c2y": 1.0
+            "c2y": 1.0,
+            "motion": {
+              "path": 0,
+              "preset": 1,
+              "outX": 0.0,
+              "outY": 0.0,
+              "outZ": 0.0,
+              "inX": 0.0,
+              "inY": 0.0,
+              "inZ": 0.0,
+              "lookAlongPath": false,
+              "fovPeakOffset": 0.0
+            }
           }
         ]
       }
@@ -312,14 +393,16 @@ CameraSystem::applyToMCBE(sample);
 |---|---|---|---|
 | 1 | `editing/models/CameraKeyframe.h` | 收敛完整关键帧字段、两个贝塞尔控制点与序列化 | 单测：JSON round-trip |
 | 2 | `editing/models/CameraEntity.h` | 以 `CameraEntity` 作为唯一 Camera 资产，清理旧 CameraTrack 依赖 | 编译 |
-| 3 | `editing/CameraSystem.*` | 实现以 `timelineTick` 为输入的确定性 Keyframe 采样 | 单测：边界、五种 easing、yaw 最短路径 |
-| 4 | `editing/commands/CameraCommands.*` | 增加捕获/覆盖完整自由机位的命令，完善 CRUD 与 Undo/Redo | 单测：execute/undo 互逆 |
-| 5 | `editing/models/EditorStateExt.h` | 移除 `cameraTracks`、旧 video 轨和活动轨索引语义 | 编译 + 迁移测试 |
-| 6 | `ui/panels/TimelinePanel.*` | Camera 行绘制关键帧、选择、拖拽和吸附 | 手动：一次拖拽只生成一个 Undo 项 |
-| 7 | `ui/panels/DetailsPanel.*` | Camera / Keyframe / SequenceSegment 上下文编辑 | 手动：字段保存和撤销 |
-| 8 | `ViewportPanel` / `RealtimePreview` | 时间跳转同步采样相机，移动仅作为临时预览 | 手动：连续布置机位 |
-| 9 | `RenderJob` | 按 `timelineTick` 采样 Camera，按 `sourceTick` 推进世界 | 导出：世界变速不改变镜头节奏 |
-| 10 | 编辑数据序列化与迁移 | 保存 v3 数据，迁移旧 `cameraTracks` | 单测：旧档迁移和 v3 round-trip |
+| 3 | `editing/models/CameraMotionSegment.h` | 增加路径类型、过渡预设、3D 控制点和 FOV 峰值字段 | 单测：默认值与边界钳制 |
+| 4 | `editing/CameraSystem.*` | 实现以 `timelineTick` 为输入的路径、缓动、朝向和 FOV 确定性采样 | 单测：边界、五种 easing、三种路径、yaw 最短路径 |
+| 5 | `editing/CameraTransitionPresets.*` | 实现首版七种预设及零距离安全退化 | 单测：预设只修改运动段、不修改关键帧端点 |
+| 6 | `editing/commands/CameraCommands.*` | 增加捕获/覆盖完整自由机位、运动预设和运动段编辑命令 | 单测：execute/undo 互逆 |
+| 7 | `editing/models/EditorStateExt.h` | 移除 `cameraTracks`、旧 video 轨和活动轨索引语义 | 编译 + 迁移测试 |
+| 8 | `ui/panels/TimelinePanel.*` | Camera 行绘制关键帧、选择、拖拽和吸附 | 手动：一次拖拽只生成一个 Undo 项 |
+| 9 | `ui/panels/DetailsPanel.*` | Camera / Keyframe / MotionSegment / SequenceSegment 上下文编辑 | 手动：预设应用、微调和撤销 |
+| 10 | `ViewportPanel` / `RealtimePreview` | 实现序列采样、单机采样、临时自由机位和无相机状态 | 手动：连续布置机位、播放和 seek |
+| 11 | `RenderJob` | 按 `timelineTick` 采样 Camera，按 `sourceTick` 推进世界 | 导出：世界变速不改变镜头节奏 |
+| 12 | 编辑数据序列化与迁移 | 保存 motion 配置，迁移旧 `cameraTracks` | 单测：旧档迁移和 v3 round-trip |
 
 ### 3.2 关键不变量
 
@@ -331,6 +414,9 @@ CameraSystem::applyToMCBE(sample);
 6. **时间职责分离**：World Actor 是 `timelineTick → sourceTick` 的唯一映射器；CameraSystem 不参与该映射。
 7. **序列硬切**：切段只切 Camera 选择，不混合不同 Camera 的参数。
 8. **安全隔离**：只有本地回放世界可以接收 MCBE 摄影机覆盖。
+9. **运动段归属明确**：相邻帧 `[A, B]` 的路径和过渡只由 A 的 `outgoingMotion` 控制；插入、删除或移动关键帧后必须重新校验受影响的前后两个区间。
+10. **端点精确**：任何路径、缓动、自动朝向或 FOV 峰值都必须满足 `sampleAt(A.tick)==A`、`sampleAt(B.tick)==B`。
+11. **预览不污染数据**：临时自由机位只存在于预览状态，播放、seek、选择变化时丢弃，不进入持久化或导出。
 
 ### 3.3 测试用例
 
@@ -348,6 +434,12 @@ CameraSystem::applyToMCBE(sample);
 | CT-T10 | 旧 `cameraTracks` 加载 | 每条旧轨迁移为一台 Keyframe Camera，关键帧数据不丢失 |
 | CT-T11 | v3 保存后重读 | `cameras`、关键帧、序列绑定和缓动控制点一致 |
 | CT-T12 | 非隔离世界调用 apply | 拒绝覆盖摄影机且不修改游戏相机 |
+| CT-T13 | Linear / CubicBezier / AutoSmooth | 路径采样连续；AutoSmooth 端点或邻帧不足时退回 Linear |
+| CT-T14 | 七种内置过渡预设 | 运动参数正确写入，关键帧端点 position / rotation / fov 不被修改 |
+| CT-T15 | 零距离关键帧套用弧线预设 | 不产生 NaN，安全退回直线并保留合法时间缓动 |
+| CT-T16 | 运动段中点 FOV 峰值 | 段首尾 FOV 精确不变，中点按 `sin(pi*t)` 产生预期偏移 |
+| CT-T17 | 临时自由机位后播放或 seek | 临时状态丢弃，Camera 回到持久化轨道采样结果 |
+| CT-T18 | Sequence 段边界切换 | 不使用运动预设，不产生跨 Camera 插值或混合 |
 
 ### 3.4 风险与回退
 
