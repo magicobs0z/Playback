@@ -100,7 +100,7 @@ void testCameraAndUndo() {
     auto state = makeState();
     editor::CommandStack stack;
     stack.push(std::make_unique<video_editing::AddFreeCamera>("Main"), state);
-    require(state.cameras.size() == 1 && state.cameras.front().keys.size() == 1 && stack.canUndo(), "add camera command must create a camera with an initial keyframe");
+    require(state.cameras.size() == 1 && state.cameras.front().keys.empty() && stack.canUndo(), "add camera command must create an empty camera awaiting a captured keyframe");
     const auto cameraId = state.cameras.front().id;
     stack.push(std::make_unique<video_editing::BindSequenceToCamera>("sequence", cameraId), state);
     require(state.sequence.front().cameraId == cameraId, "bind command must set camera id");

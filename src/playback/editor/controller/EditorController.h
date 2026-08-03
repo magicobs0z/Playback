@@ -16,6 +16,7 @@ public:
 
     void reset();
     void tick(bool hudVisible);
+    void applyPreviewCameraAfterReplayTick();
 
 private:
     void publishState(bool hudVisible);

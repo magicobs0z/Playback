@@ -9,6 +9,7 @@ namespace playback::editor {
 [[nodiscard]] bool hookReplayUI(bool enable);
 
 void tickReplayUI(bool hudVisible);
+void applyReplayCameraPreview();
 
 void submitEditorAction(EditorAction action);
 

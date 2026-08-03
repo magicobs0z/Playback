@@ -8,6 +8,8 @@
 #include "playback/editor/editing/SequenceOps.h"
 #include "playback/refactor/camera-motion/CameraSampler.h"
 
+#include "mc/world/actor/player/Player.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -102,7 +104,11 @@ void EditorController::applyEditorAction(EditorAction const& action) {
         mCommandStack.push(CommandFactory::createRippleDeleteWorldActorSegment(action.id), mProject);
         break;
     case EditorActionType::AddCameraKeyframe:
-        mCommandStack.push(CommandFactory::createAddCameraKeyframe(action.id, action.tick), mProject);
+        if (auto const* player = functions::ReplaySession::getInstance().getReplayPlayer()) {
+            auto const& position = player->getPosition();
+            auto const& rotation = player->getRotation();
+            mCommandStack.push(CommandFactory::createCaptureCameraKeyframe(action.id, action.tick, {position.x, position.y, position.z}, rotation.y, rotation.x, 90.0f), mProject);
+        }
         break;
     case EditorActionType::MoveCameraKeyframe:
         mCommandStack.push(CommandFactory::createMoveCameraKeyframe(action.id, action.secondaryId, action.tick), mProject);
@@ -143,6 +149,10 @@ void EditorController::applyEditorAction(EditorAction const& action) {
 void EditorController::applyPreviewCamera() {
     auto& session = functions::ReplaySession::getInstance();
     if (!session.isActive() || !session.hasJoinedReplayWorld()) return;
+    if (session.isPaused()) {
+        session.clearEditorCameraOverride();
+        return;
+    }
     auto const* camera = editing::CameraBindingOps::resolveCamera(mProject, mPreviewCameraId);
     if (mPreviewCameraId.empty()) {
         auto const* segment = editing::SequenceOps::findSegmentAt(mProject.sequence, mProject.currentTick);
@@ -160,6 +170,13 @@ void EditorController::applyPreviewCamera() {
     session.setEditorCameraOverride(sample.position.x, sample.position.y, sample.position.z, sample.rotation.x, sample.rotation.y, sample.fov);
 }
 
+void EditorController::applyPreviewCameraAfterReplayTick() {
+    auto& session = functions::ReplaySession::getInstance();
+    if (!session.isActive()) return;
+    mProject.currentTick = std::max(0, session.getCurrentTick());
+    applyPreviewCamera();
+}
+
 void EditorController::publishState(bool hudVisible) {
     auto& session = functions::ReplaySession::getInstance();
 
@@ -175,7 +192,6 @@ void EditorController::publishState(bool hudVisible) {
     mProject.currentTick = state.currentTick;
     mProject.playing = !state.paused;
     mProject.playbackSpeed = state.playbackSpeed;
-    applyPreviewCamera();
     state.project = std::make_shared<editing::model::EditorStateExt>(mProject);
     state.canUndo = mCommandStack.canUndo();
     state.canRedo = mCommandStack.canRedo();
@@ -321,9 +337,6 @@ void EditorController::tick(bool hudVisible) {
             break;
         }
     }
-
-    mProject.currentTick = std::max(0, session.getCurrentTick());
-    applyPreviewCamera();
 
     publishState(hudVisible);
 }

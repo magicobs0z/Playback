@@ -87,6 +87,8 @@ bool hookReplayUI(bool enable) {
 
 void tickReplayUI(bool hudVisible) { gController.tick(hudVisible); }
 
+void applyReplayCameraPreview() { gController.applyPreviewCameraAfterReplayTick(); }
+
 void submitEditorAction(EditorAction action) { gContext.submit(std::move(action)); }
 
 } // namespace playback::editor

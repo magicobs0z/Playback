@@ -11,12 +11,14 @@ using editing::model::EasingType;
 using editing::model::Vec3;
 
 constexpr float kPi = 3.14159265358979323846f;
+constexpr float kFullTurnDegrees = 360.0f;
+constexpr float kHalfTurnDegrees = 180.0f;
 
 float interpolate(float from, float to, float ratio) { return from + (to - from) * ratio; }
 Vec3 interpolate(Vec3 from, Vec3 to, float ratio) { return {interpolate(from.x, to.x, ratio), interpolate(from.y, to.y, ratio), interpolate(from.z, to.z, ratio)}; }
 Vec3 add(Vec3 left, Vec3 right) { return {left.x + right.x, left.y + right.y, left.z + right.z}; }
 Vec3 scale(Vec3 value, float factor) { return {value.x * factor, value.y * factor, value.z * factor}; }
-float shortestAngle(float from, float to, float ratio) { float delta = std::fmod(to - from + kPi, 2.0f * kPi); if (delta < 0.0f) delta += 2.0f * kPi; return from + (delta - kPi) * ratio; }
+float shortestAngle(float from, float to, float ratio) { float delta = std::fmod(to - from + kHalfTurnDegrees, kFullTurnDegrees); if (delta < 0.0f) delta += kFullTurnDegrees; return from + (delta - kHalfTurnDegrees) * ratio; }
 float cubic(float value, float p1, float p2) { const float inverse = 1.0f - value; return 3.0f * inverse * inverse * value * p1 + 3.0f * inverse * value * value * p2 + value * value * value; }
 float cubicDerivative(float value, float p1, float p2) { const float inverse = 1.0f - value; return 3.0f * inverse * inverse * p1 + 6.0f * inverse * value * (p2 - p1) + 3.0f * value * value * (1.0f - p2); }
 float ease(const CameraKeyframe& key, float value) {
