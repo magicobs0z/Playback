@@ -222,9 +222,10 @@ void TimelinePanel::draw() {
     float listY = bodyTop + 2.0f;
     for (auto const& row : mTrackTree.rows()) {
         float const rowBottom = listY + row.height;
+        auto const* selectedKeyframe = editor.selection().getAs<editing::model::SelectedKeyframe>();
         bool selected = (row.kind == editing::model::TrackRowKind::Sequence && editor.selection().getAs<editing::model::SelectedSequence>())
             || (row.kind == editing::model::TrackRowKind::WorldActor && editor.selection().getAs<editing::model::SelectedWorldActor>())
-            || (row.kind == editing::model::TrackRowKind::Camera && editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7));
+            || (row.kind == editing::model::TrackRowKind::Camera && ((editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7)) || (selectedKeyframe && selectedKeyframe->trackId == row.id.substr(7))));
         ImGui::SetCursorScreenPos({fullMin.x, listY});
         ImGui::InvisibleButton(("##track-row-" + row.id).c_str(), {listWidth, row.height});
         bool const hovered = ImGui::IsItemHovered();
@@ -236,11 +237,20 @@ void TimelinePanel::draw() {
         if (row.kind == editing::model::TrackRowKind::Camera) {
             label = "    " + row.name;
             if (row.cameraIndex == 0) label = std::string(mCamerasExpanded ? "v  Cameras (" : ">  Cameras (") + std::to_string(project->cameras.size()) + ")   +    " + row.name;
-            if (clicked) editor.selection().select(editing::model::SelectedCamera{row.id.substr(7)});
+            if (clicked) {
+                auto const cameraId = row.id.substr(7);
+                editor.selection().select(editing::model::SelectedCamera{cameraId});
+                EditorAction action{EditorActionType::SetPreviewCamera};
+                action.id = cameraId;
+                editor.submitAction(std::move(action));
+            }
             if (row.cameraIndex == 0 && clicked && ImGui::GetMousePos().x < fullMin.x + 100.0f) mCamerasExpanded = !mCamerasExpanded;
         } else if (row.kind == editing::model::TrackRowKind::Sequence) {
             label = "O  Camera Sequence";
-            if (clicked) editor.selection().select(editing::model::SelectedSequence{});
+            if (clicked) {
+                editor.selection().select(editing::model::SelectedSequence{});
+                editor.submitAction({EditorActionType::ClearPreviewCamera});
+            }
         } else if (row.kind == editing::model::TrackRowKind::WorldActor) {
             label = "O  World Actor";
             if (clicked) editor.selection().select(editing::model::SelectedWorldActor{});
@@ -277,6 +287,7 @@ void TimelinePanel::draw() {
         return it == project->cameras.end() ? "Missing camera" : it->name.c_str();
     };
     auto tickFromMouse = [&] { return std::clamp(static_cast<int>((ImGui::GetMousePos().x - canvasLeft + mScrollX) / mPixelsPerTick), 0, state.totalTicks); };
+    auto const* selectedKeyframe = editor.selection().getAs<editing::model::SelectedKeyframe>();
     float y = bodyTop + 2.0f;
     bool clickConsumed = false;
     for (auto const& row : mTrackTree.rows()) {
@@ -329,10 +340,21 @@ void TimelinePanel::draw() {
             drawList->AddRectFilled({canvasLeft, y + 5.0f}, {fullMax.x, rowBottom - 5.0f}, kCameraColor);
             for (auto const& key : camera.keys) {
                 float x = canvasLeft + key.tick * mPixelsPerTick - mScrollX;
-                drawList->AddRectFilled({x - 4.0f, (y + rowBottom) * 0.5f - 4.0f}, {x + 4.0f, (y + rowBottom) * 0.5f + 4.0f}, IM_COL32(212, 212, 212, 255));
+                float const centerY = (y + rowBottom) * 0.5f;
+                bool const selected = selectedKeyframe && selectedKeyframe->trackId == camera.id && selectedKeyframe->keyframeId == key.id;
+                ImVec2 const top{x, centerY - 5.0f};
+                ImVec2 const right{x + 5.0f, centerY};
+                ImVec2 const bottom{x, centerY + 5.0f};
+                ImVec2 const left{x - 5.0f, centerY};
+                drawList->AddQuadFilled(top, right, bottom, left, selected ? IM_COL32(244, 202, 47, 255) : IM_COL32(255, 255, 255, 255));
+                drawList->AddQuad(top, right, bottom, left, IM_COL32(24, 24, 24, 255), 1.0f);
                 if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 7.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) {
                     clickConsumed = true;
                     editor.selection().select(editing::model::SelectedKeyframe{camera.id, key.id});
+                    EditorAction previewAction{EditorActionType::SetPreviewCamera};
+                    previewAction.id = camera.id;
+                    editor.submitAction(std::move(previewAction));
+                    submitSeek(key.tick);
                 }
             }
         } else if (row.kind == editing::model::TrackRowKind::Marker) {

@@ -260,6 +260,9 @@ public:
 
     [[nodiscard]] bool setPaused(bool paused);
 
+    bool setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov);
+    void clearEditorCameraOverride();
+
     [[nodiscard]] bool isInjectingPacket(Packet const* packet) const {
         return packet && mInjectingPacket.load(std::memory_order_acquire) == packet;
     }

@@ -19,6 +19,7 @@ public:
 
 private:
     void publishState(bool hudVisible);
+    void applyPreviewCamera();
     void ensureProject(int totalTicks);
     void applyEditorAction(EditorAction const& action);
     void refreshBrowser();
@@ -40,6 +41,7 @@ private:
     editing::model::EditorStateExt               mProject;
     editing::command::CommandStack               mCommandStack;
     int                                          mProjectTotalTicks{-1};
+    std::string                                  mPreviewCameraId;
 };
 
 } // namespace playback::editor

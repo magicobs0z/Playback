@@ -4,6 +4,9 @@
 #include "playback/screen/ReplayBrowser.h"
 #include "playback/editor/editing/commands/CameraCommands.h"
 #include "playback/editor/editing/commands/CommandFactory.h"
+#include "playback/editor/editing/CameraBindingOps.h"
+#include "playback/editor/editing/SequenceOps.h"
+#include "playback/refactor/camera-motion/CameraSampler.h"
 
 #include <algorithm>
 #include <utility>
@@ -42,6 +45,7 @@ void EditorController::reset() {
     mProject = {};
     mCommandStack.clear();
     mProjectTotalTicks = -1;
+    mPreviewCameraId.clear();
 }
 
 void EditorController::ensureProject(int totalTicks) {
@@ -49,7 +53,7 @@ void EditorController::ensureProject(int totalTicks) {
     if (mProjectTotalTicks == totalTicks) return;
 
     mProject = {};
-    mProject.version = 3;
+    mProject.version = 4;
     mProject.totalTicks = totalTicks;
     mProject.sequence.push_back({"sequence", 0, totalTicks});
     mProject.worldActor.id = "worldActor";
@@ -111,6 +115,7 @@ void EditorController::applyEditorAction(EditorAction const& action) {
         break;
     case EditorActionType::DeleteCamera:
         mCommandStack.push(CommandFactory::createDeleteCamera(action.id), mProject);
+        if (mPreviewCameraId == action.id) mPreviewCameraId.clear();
         break;
     case EditorActionType::UnbindCamera:
         mCommandStack.push(CommandFactory::createUnbindCamera(action.id), mProject);
@@ -124,9 +129,35 @@ void EditorController::applyEditorAction(EditorAction const& action) {
     case EditorActionType::SetSubActorDetails:
         mCommandStack.push(CommandFactory::createSetSubActorDetails(action.id, action.details), mProject);
         break;
+    case EditorActionType::SetPreviewCamera:
+        mPreviewCameraId = action.id;
+        break;
+    case EditorActionType::ClearPreviewCamera:
+        mPreviewCameraId.clear();
+        break;
     default:
         break;
     }
+}
+
+void EditorController::applyPreviewCamera() {
+    auto& session = functions::ReplaySession::getInstance();
+    if (!session.isActive() || !session.hasJoinedReplayWorld()) return;
+    auto const* camera = editing::CameraBindingOps::resolveCamera(mProject, mPreviewCameraId);
+    if (mPreviewCameraId.empty()) {
+        auto const* segment = editing::SequenceOps::findSegmentAt(mProject.sequence, mProject.currentTick);
+        camera = segment ? editing::CameraBindingOps::resolveCamera(mProject, segment->cameraId) : nullptr;
+    }
+    if (!camera) {
+        session.clearEditorCameraOverride();
+        return;
+    }
+    auto const sample = camera_motion::CameraSampler::sampleAt(*camera, mProject.currentTick);
+    if (!sample.valid) {
+        session.clearEditorCameraOverride();
+        return;
+    }
+    session.setEditorCameraOverride(sample.position.x, sample.position.y, sample.position.z, sample.rotation.x, sample.rotation.y, sample.fov);
 }
 
 void EditorController::publishState(bool hudVisible) {
@@ -144,6 +175,7 @@ void EditorController::publishState(bool hudVisible) {
     mProject.currentTick = state.currentTick;
     mProject.playing = !state.paused;
     mProject.playbackSpeed = state.playbackSpeed;
+    applyPreviewCamera();
     state.project = std::make_shared<editing::model::EditorStateExt>(mProject);
     state.canUndo = mCommandStack.canUndo();
     state.canRedo = mCommandStack.canRedo();
@@ -289,6 +321,9 @@ void EditorController::tick(bool hudVisible) {
             break;
         }
     }
+
+    mProject.currentTick = std::max(0, session.getCurrentTick());
+    applyPreviewCamera();
 
     publishState(hudVisible);
 }

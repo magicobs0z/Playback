@@ -44,6 +44,8 @@ enum class EditorActionType {
     SetCameraKind,
     CreateBindingCamera,
     SetSubActorDetails,
+    SetPreviewCamera,
+    ClearPreviewCamera,
 };
 
 struct EditorAction {

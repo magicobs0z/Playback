@@ -6,7 +6,7 @@
 
 组件系统必须覆盖 Sequence、Sequence Segment、World Actor、World Actor Segment、Sub Actor、Camera、Keyframe、Marker 与空状态；所有可编辑字段仍经 `EditorAction → EditorController → CommandStack` 提交。
 
-所有组件使用编辑器局部字体比例、统一内边距、统一行高和统一语义色。Details 内容必须可滚动，窄窗口下标签和值列按可用宽度自适应，不能挤出面板。
+所有组件使用编辑器局部字体比例、统一内边距、统一行高和统一语义色。Details 内容必须可滚动，窄窗口下标签和值列按可用宽度自适应，不能挤出面板。属性行、分组边界和操作区域使用低对比度 0.75px 灰色细线；操作按钮使用深灰填充、灰色 0.75px 描边和 3px 小圆角。
 
 ## 二、架构
 

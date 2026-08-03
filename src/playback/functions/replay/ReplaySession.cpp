@@ -360,6 +360,15 @@ bool ReplaySession::setPaused(bool paused) {
     return true;
 }
 
+bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov) {
+    if (!mActive || !mReplayWorldJoined || !mReplayPlayer) return false;
+    mReplayPlayer->moveTo(Vec3{x, y, z}, Vec2{pitch, yaw});
+    (void)fov;
+    return true;
+}
+
+void ReplaySession::clearEditorCameraOverride() {}
+
 int ReplaySession::getTotalTicks() const { return std::max(0, mMeta.totalTicks); }
 
 void ReplaySession::adjustPlaybackSpeed(int direction) {

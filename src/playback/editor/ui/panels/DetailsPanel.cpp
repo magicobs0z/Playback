@@ -32,7 +32,7 @@ char const* cameraKindName(editing::model::CameraKind kind) {
 }
 
 char const* easingName(editing::model::EasingType easing) {
-    static constexpr std::array names{"Linear", "Ease In", "Ease Out", "Ease InOut"};
+    static constexpr std::array names{"Linear", "Ease In", "Ease Out", "Ease InOut", "Cubic Bezier"};
     return names[std::clamp(static_cast<int>(easing), 0, static_cast<int>(names.size()) - 1)];
 }
 
@@ -346,8 +346,8 @@ void DetailsPanel::draw() {
     }
 
     // ===== Camera =====
-    if (auto const* selected = selection.getAs<editing::model::SelectedCamera>()) {
-        auto const* camera = findById(project->cameras, selected->cameraId);
+    if (auto const* selectedCamera = selection.getAs<editing::model::SelectedCamera>()) {
+        auto const* camera = findById(project->cameras, selectedCamera->cameraId);
         if (!camera) {
             ImGui::TextDisabled("Camera no longer exists.");
             return;
@@ -420,7 +420,21 @@ void DetailsPanel::draw() {
             submit(std::move(action));
         }
         for (auto const& key : camera->keys) {
-            if (ImGui::Selectable(("Tick " + std::to_string(key.tick)).c_str())) editor.selection().select(editing::model::SelectedKeyframe{camera->id, key.id});
+            auto const* selectedKey = editor.selection().getAs<editing::model::SelectedKeyframe>();
+            bool const selected = selectedKey && selectedKey->trackId == camera->id && selectedKey->keyframeId == key.id;
+            ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(176, 128, 18, 255));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(205, 157, 32, 255));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(232, 184, 45, 255));
+            if (ImGui::Selectable(("Tick " + std::to_string(key.tick)).c_str(), selected)) {
+                editor.selection().select(editing::model::SelectedKeyframe{camera->id, key.id});
+                EditorAction previewAction{EditorActionType::SetPreviewCamera};
+                previewAction.id = camera->id;
+                submit(std::move(previewAction));
+                EditorAction action{EditorActionType::Seek};
+                action.tick = key.tick;
+                submit(std::move(action));
+            }
+            ImGui::PopStyleColor(3);
         }
         property::separator();
         if (property::actionButton("Delete Camera")) {
@@ -459,7 +473,7 @@ void DetailsPanel::draw() {
         ImGui::Text("FOV: %.1f", key->fov);
         int easing = static_cast<int>(key->easingType);
         if (ImGui::BeginCombo("Easing", easingName(key->easingType))) {
-            for (int index = 0; index < 4; ++index) {
+            for (int index = 0; index < 5; ++index) {
                 auto value = static_cast<editing::model::EasingType>(index);
                 if (ImGui::Selectable(easingName(value), index == easing)) {
                     EditorAction action{EditorActionType::SetKeyframeEasing};
