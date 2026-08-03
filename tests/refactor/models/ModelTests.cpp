@@ -10,6 +10,7 @@
 #include "playback/editor/editing/models/EditorStateExt.h"
 #include "playback/editor/editing/models/TrackTreeModel.h"
 #include "playback/editor/ui/EditorProjectCodec.h"
+#include "playback/refactor/camera-motion/CameraSampler.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -20,11 +21,14 @@ namespace editor {
 using playback::editor::editing::model::AgentDetails;
 using playback::editor::editing::model::CameraEntity;
 using playback::editor::editing::model::CameraKind;
+using playback::editor::editing::model::CameraPathType;
+using playback::editor::editing::model::CameraTransitionPreset;
 using playback::editor::editing::model::EditorStateExt;
 using playback::editor::editing::model::EasingType;
 using playback::editor::editing::model::IEditCommand;
 using playback::editor::editing::model::TrackRowKind;
 using playback::editor::editing::model::TrackTreeModel;
+using playback::editor::editing::model::Vec3;
 using playback::editor::editing::command::CommandFactory;
 using playback::editor::editing::command::CommandStack;
 using playback::editor::ui::EditorProjectCodec;
@@ -52,6 +56,8 @@ using playback::editor::editing::command::SplitWorldActorAtPlayhead;
 using playback::editor::editing::command::TrimSequenceSegment;
 using playback::editor::editing::command::TrimWorldActorSegment;
 using playback::editor::editing::command::UnbindCamera;
+using playback::editor::editing::command::CaptureCameraKeyframe;
+using playback::editor::editing::command::ApplyCameraTransitionPreset;
 }
 
 void require(bool value, const char* message) {
@@ -94,7 +100,7 @@ void testCameraAndUndo() {
     auto state = makeState();
     editor::CommandStack stack;
     stack.push(std::make_unique<video_editing::AddFreeCamera>("Main"), state);
-    require(state.cameras.size() == 1 && stack.canUndo(), "add camera command must modify v3 state");
+    require(state.cameras.size() == 1 && state.cameras.front().keys.size() == 1 && stack.canUndo(), "add camera command must create a camera with an initial keyframe");
     const auto cameraId = state.cameras.front().id;
     stack.push(std::make_unique<video_editing::BindSequenceToCamera>("sequence", cameraId), state);
     require(state.sequence.front().cameraId == cameraId, "bind command must set camera id");
@@ -104,6 +110,29 @@ void testCameraAndUndo() {
     require(state.cameras.size() == 2 && state.worldActor.subActors.front().boundCameraIds.size() == 1, "binding camera must update both associations");
     require(stack.undo(state), "binding camera must undo");
     require(state.cameras.size() == 1 && state.worldActor.subActors.front().boundCameraIds.empty(), "binding camera undo must restore both associations");
+}
+
+void testCameraMotion() {
+    auto state = makeState();
+    editor::CommandStack stack;
+    stack.push(std::make_unique<video_editing::AddFreeCamera>("Motion"), state);
+    const auto cameraId = state.cameras.front().id;
+    stack.push(std::make_unique<video_editing::CaptureCameraKeyframe>(cameraId, 0, editor::Vec3{0, 80, 0}, 6.0f, 0.0f, 90.0f), state);
+    stack.push(std::make_unique<video_editing::CaptureCameraKeyframe>(cameraId, 100, editor::Vec3{10, 80, 0}, 0.0f, 0.0f, 70.0f), state);
+    require(state.cameras.front().keys.size() == 2, "capture must insert complete keyframes");
+    stack.push(std::make_unique<video_editing::CaptureCameraKeyframe>(cameraId, 100, editor::Vec3{12, 81, 0}, 0.0f, 0.0f, 68.0f), state);
+    require(state.cameras.front().keys.size() == 2 && state.cameras.front().keys.back().position.x == 12.0f, "capture must overwrite duplicate ticks");
+    state.cameras.front().keys.front().easingType = editor::EasingType::EaseInOut;
+    auto sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 50);
+    require(sample.valid && sample.position.x == 6.0f && sample.fov == 79.0f, "keyframe sampler must apply timeline interpolation");
+    stack.push(std::make_unique<video_editing::ApplyCameraTransitionPreset>(cameraId, state.cameras.front().keys.front().id, editor::CameraTransitionPreset::ArcPushIn), state);
+    require(state.cameras.front().keys.front().outgoingMotion.pathType == editor::CameraPathType::CubicBezier, "arc preset must configure cubic path");
+    sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 0);
+    require(sample.position.x == 0.0f && sample.fov == 90.0f, "motion presets must preserve segment start");
+    sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 100);
+    require(sample.position.x == 12.0f && sample.fov == 68.0f, "motion presets must preserve segment end");
+    require(stack.undo(state), "motion preset must undo");
+    require(state.cameras.front().keys.front().outgoingMotion.pathType == editor::CameraPathType::Linear, "motion preset undo must restore segment");
 }
 
 void testCommandGroups() {
@@ -175,9 +204,11 @@ void testFactoryAndStack() {
     commands.push_back(editor::CommandFactory::createCreateBindingCamera("actor", "Follow"));
     commands.push_back(editor::CommandFactory::createUnbindCamera("camera_1"));
     commands.push_back(editor::CommandFactory::createAddCameraKeyframe("camera_1", 50));
+    commands.push_back(editor::CommandFactory::createCaptureCameraKeyframe("camera_1", 50, {1, 2, 3}, 0.0f, 0.0f, 90.0f));
     commands.push_back(editor::CommandFactory::createMoveCameraKeyframe("camera_1", "key", 50));
     commands.push_back(editor::CommandFactory::createDeleteCameraKeyframe("camera_1", "key"));
     commands.push_back(editor::CommandFactory::createSetKeyframeEasing("camera_1", "key", editor::EasingType::EaseOut));
+    commands.push_back(editor::CommandFactory::createApplyCameraTransitionPreset("camera_1", "key", editor::CameraTransitionPreset::CinematicEase));
     commands.push_back(editor::CommandFactory::createSetCameraKind("camera_1", editor::CameraKind::Path));
     commands.push_back(editor::CommandFactory::createSetSubActorDetails("actor", {}));
     for (const auto& command : commands) require(command != nullptr, "every v3 factory method must return a command");
@@ -238,11 +269,19 @@ void testEditorProjectCodec() {
     state.projectName = "Codec Test";
     state.markers.push_back({"marker", "Cut", 40});
     state.cameras.push_back({"camera", "Main"});
+    state.cameras.back().keys.push_back({"key", 0, {1, 2, 3}, 0.1f, 0.2f, 80.0f});
+    state.cameras.back().keys.back().easingType = editor::EasingType::CubicBezier;
+    state.cameras.back().keys.back().bezierCtrl1 = {0.2f, -0.1f};
+    state.cameras.back().keys.back().outgoingMotion.pathType = editor::CameraPathType::CubicBezier;
+    state.cameras.back().keys.back().outgoingMotion.preset = editor::CameraTransitionPreset::ArcPushIn;
+    state.cameras.back().keys.back().outgoingMotion.outControl = {2, 3, 4};
+    state.cameras.back().keys.back().outgoingMotion.fovPeakOffset = -5.0f;
     state.sequence.front().cameraId = "camera";
     auto bytes = editor::EditorProjectCodec::encode(state);
     auto decoded = editor::EditorProjectCodec::decode(bytes);
     require(decoded.has_value(), "editor project codec must decode its own payload");
     require(decoded->projectName == state.projectName && decoded->sequence.front().cameraId == "camera", "editor project codec must preserve v3 sequence data");
+    require(decoded->cameras.front().keys.front().easingType == editor::EasingType::CubicBezier && decoded->cameras.front().keys.front().outgoingMotion.outControl.z == 4.0f && decoded->cameras.front().keys.front().outgoingMotion.fovPeakOffset == -5.0f, "editor project codec must preserve camera motion data");
     require(decoded->worldActor.subActors.front().id == "actor" && decoded->markers.front().label == "Cut", "editor project codec must preserve nested data");
     bytes.back() ^= 1;
     require(!editor::EditorProjectCodec::decode(bytes).has_value(), "editor project codec must reject corrupt payloads");
@@ -253,6 +292,7 @@ int main() {
     testSequenceOps();
     testWorldActorOps();
     testCameraAndUndo();
+    testCameraMotion();
     testCommandGroups();
     testFactoryAndStack();
     testTrackTreeModel();

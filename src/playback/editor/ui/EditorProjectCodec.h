@@ -10,7 +10,7 @@ namespace playback::editor::ui {
 
 class EditorProjectCodec {
 public:
-    static constexpr int kFormatVersion = 3;
+    static constexpr int kFormatVersion = 4;
     static constexpr std::string_view kEntryName = "editor.bin";
 
     [[nodiscard]] static std::string encode(const editing::model::EditorStateExt& state);

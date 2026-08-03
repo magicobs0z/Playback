@@ -100,6 +100,7 @@ target("refactor-model-tests")
     add_files("src/playback/editor/editing/commands/CameraCommands.cpp")
     add_files("src/playback/editor/editing/commands/SubActorCommands.cpp")
     add_files("src/playback/editor/editing/commands/EditingCommands.cpp")
+    add_files("src/playback/refactor/camera-motion/CameraSampler.cpp")
     after_build(function (target)
         import("utils.archive")
 
