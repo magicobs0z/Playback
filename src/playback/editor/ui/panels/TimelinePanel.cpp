@@ -13,9 +13,6 @@ namespace playback::editor::ui {
 
 namespace {
 
-constexpr float kToolbarHeight = 34.0f;
-constexpr float kTransportHeight = 32.0f;
-constexpr float kRulerHeight = 26.0f;
 constexpr float kSplitterThickness = 4.0f;
 
 constexpr ImU32 kBackground = IM_COL32(27, 27, 27, 255);
@@ -27,14 +24,15 @@ constexpr ImU32 kCameraColor = IM_COL32(77, 63, 83, 255);
 
 bool iconButton(char const* id, char const* icon, char const* tooltip, bool enabled = true) {
     ImGui::BeginDisabled(!enabled);
+    float const buttonSize = std::max(25.0f, ImGui::GetFontSize() + 12.0f);
     ImVec2 const cursor = ImGui::GetCursorScreenPos();
     ImVec2 const mouse = ImGui::GetMousePos();
-    bool const hovered = enabled && mouse.x >= cursor.x && mouse.x <= cursor.x + 25.0f && mouse.y >= cursor.y && mouse.y <= cursor.y + 25.0f;
+    bool const hovered = enabled && mouse.x >= cursor.x && mouse.x <= cursor.x + buttonSize && mouse.y >= cursor.y && mouse.y <= cursor.y + buttonSize;
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_Text, hovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(170, 170, 170, 255));
-    bool const clicked = ImGui::Button((std::string(icon) + "##" + id).c_str(), {25.0f, 25.0f});
+    bool const clicked = ImGui::Button((std::string(icon) + "##" + id).c_str(), {buttonSize, buttonSize});
     ImGui::PopStyleColor(4);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && tooltip) ImGui::SetTooltip("%s", tooltip);
     ImGui::EndDisabled();
@@ -102,11 +100,15 @@ void TimelinePanel::draw() {
     ImVec2 const available = ImGui::GetContentRegionAvail();
     if (available.x < 220.0f || available.y < 120.0f) return;
     ImVec2 const fullMax{fullMin.x + available.x, fullMin.y + available.y};
+    float const fontSize = ImGui::GetFontSize();
+    float const toolbarHeight = fontSize + 16.0f;
+    float const transportHeight = fontSize + 14.0f;
+    float const rulerHeight = fontSize + 12.0f;
     auto* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(fullMin, fullMax, kBackground);
 
     ImGui::SetCursorScreenPos(fullMin);
-    ImGui::BeginChild("##TimelineToolbar", {available.x, kToolbarHeight}, false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("##TimelineToolbar", {available.x, toolbarHeight}, false, ImGuiWindowFlags_NoScrollbar);
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(32, 32, 32, 255));
     auto sameIcon = [] { ImGui::SameLine(0.0f, 1.0f); };
     if (iconButton("undo", ICON_UNDO, "Undo", state.canUndo)) submitEdit({EditorActionType::UndoEditorEdit});
@@ -175,12 +177,13 @@ void TimelinePanel::draw() {
     ImGui::PopStyleColor();
     ImGui::EndChild();
 
-    float const workTop = fullMin.y + kToolbarHeight;
-    float const workBottom = fullMax.y - kTransportHeight;
-    float const listWidth = std::clamp(available.x * mTrackListWidthRatio, 160.0f, available.x - 180.0f);
+    float const workTop = fullMin.y + toolbarHeight;
+    float const workBottom = fullMax.y - transportHeight;
+    float const minimumListWidth = std::max(160.0f, fontSize * 12.0f);
+    float const listWidth = std::clamp(available.x * mTrackListWidthRatio, minimumListWidth, available.x - std::max(180.0f, fontSize * 12.0f));
     float const canvasLeft = fullMin.x + listWidth + kSplitterThickness;
     float const canvasWidth = fullMax.x - canvasLeft;
-    float const bodyTop = workTop + kRulerHeight;
+    float const bodyTop = workTop + rulerHeight;
     float const bodyBottom = workBottom;
     float const contentWidth = std::max(canvasWidth, state.totalTicks * mPixelsPerTick);
     float const maxScroll = std::max(0.0f, contentWidth - canvasWidth);
@@ -196,7 +199,7 @@ void TimelinePanel::draw() {
 
     drawList->AddRectFilled({fullMin.x, workTop}, {fullMin.x + listWidth, workBottom}, kSidebarBackground);
     ImGui::SetCursorScreenPos({fullMin.x, workTop});
-    ImGui::BeginChild("##TimelineTrackControls", {listWidth, kRulerHeight}, false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("##TimelineTrackControls", {listWidth, rulerHeight}, false, ImGuiWindowFlags_NoScrollbar);
     char search[128]{};
     std::snprintf(search, sizeof(search), "%s", mTrackSearch.c_str());
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(28, 122, 190, 255));
@@ -257,12 +260,12 @@ void TimelinePanel::draw() {
         float x = canvasLeft + tick * mPixelsPerTick - mScrollX;
         if (x < canvasLeft || x > fullMax.x) continue;
         bool const major = tick % majorStep == 0;
-        drawList->AddLine({x, workTop + (major ? 14.0f : 21.0f)}, {x, workTop + kRulerHeight}, major ? IM_COL32(155, 158, 168, 255) : IM_COL32(72, 75, 84, 255));
+        drawList->AddLine({x, workTop + (major ? rulerHeight * 0.5f : rulerHeight * 0.75f)}, {x, workTop + rulerHeight}, major ? IM_COL32(155, 158, 168, 255) : IM_COL32(72, 75, 84, 255));
         if (major) drawList->AddText({x + 3.0f, workTop + 2.0f}, IM_COL32(190, 193, 202, 255), formatTick(tick).c_str());
     }
 
     ImGui::SetCursorScreenPos({canvasLeft, workTop});
-    ImGui::InvisibleButton("##timeline-ruler", {canvasWidth, kRulerHeight});
+    ImGui::InvisibleButton("##timeline-ruler", {canvasWidth, rulerHeight});
     if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         displayTick = std::clamp(static_cast<int>((ImGui::GetMousePos().x - canvasLeft + mScrollX) / mPixelsPerTick), 0, state.totalTicks);
     }
@@ -404,7 +407,7 @@ void TimelinePanel::draw() {
         ImGui::PopStyleColor(2);
     }
     ImGui::SetCursorScreenPos({fullMin.x, workBottom});
-    ImGui::BeginChild("##TimelineTransport", {listWidth, kTransportHeight}, false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("##TimelineTransport", {listWidth, transportHeight}, false, ImGuiWindowFlags_NoScrollbar);
     if (iconButton("transport-start", ICON_SKIP_BACK, "Skip to start")) submitEdit({EditorActionType::SkipToStart});
     sameIcon();
     if (iconButton("transport-prev", ICON_CHEVRONS_LEFT, "Previous frame")) { EditorAction action{EditorActionType::Seek}; action.tick = std::max(0, state.currentTick - 1); submitEdit(std::move(action)); }
