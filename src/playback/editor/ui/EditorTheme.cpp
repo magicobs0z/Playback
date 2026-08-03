@@ -7,9 +7,9 @@ namespace playback::editor::ui {
 void EditorTheme::apply() const {
     auto& style = ImGui::GetStyle();
 
-    style.WindowPadding    = {panelPadding, panelPadding};
-    style.FramePadding     = {itemSpacing, itemSpacing};
-    style.ItemSpacing      = {itemSpacing, itemSpacing};
+    style.WindowPadding    = {panelPadding + 4.0f, panelPadding + 4.0f};
+    style.FramePadding     = {itemSpacing + 3.0f, itemSpacing + 2.0f};
+    style.ItemSpacing      = {itemSpacing + 2.0f, itemSpacing + 4.0f};
     style.FrameRounding    = frameRounding;
     style.WindowRounding   = 0.0f;
     style.GrabRounding     = frameRounding;

@@ -201,15 +201,16 @@ void TimelinePanel::draw() {
     std::snprintf(search, sizeof(search), "%s", mTrackSearch.c_str());
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(28, 122, 190, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(40, 142, 214, 255));
-    if (ImGui::Button("+ Add", {48.0f, 23.0f})) {
+    if (ImGui::Button("+ Add")) {
         EditorAction action{EditorActionType::AddFreeCamera};
         action.name = "Camera " + std::to_string(project->cameras.size() + 1);
         submitEdit(std::move(action));
     }
+    float const addWidth = ImGui::GetItemRectSize().x;
     ImGui::PopStyleColor(2);
     ImGui::SameLine(0.0f, 5.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-    ImGui::SetNextItemWidth(listWidth - 58.0f);
+    ImGui::SetNextItemWidth(std::max(32.0f, listWidth - addWidth - 14.0f));
     if (ImGui::InputTextWithHint("##timeline-search", "Search Tracks", search, sizeof(search))) mTrackSearch = search;
     ImGui::PopStyleVar();
     ImGui::EndChild();
@@ -222,22 +223,27 @@ void TimelinePanel::draw() {
             || (row.kind == editing::model::TrackRowKind::WorldActor && editor.selection().getAs<editing::model::SelectedWorldActor>())
             || (row.kind == editing::model::TrackRowKind::Camera && editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7));
         ImGui::SetCursorScreenPos({fullMin.x, listY});
-        ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(58, 79, 111, 255));
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(66, 89, 124, 255));
+        ImGui::InvisibleButton(("##track-row-" + row.id).c_str(), {listWidth, row.height});
+        bool const hovered = ImGui::IsItemHovered();
+        bool const clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+        if (selected) drawList->AddRectFilled({fullMin.x, listY}, {fullMin.x + listWidth, rowBottom}, IM_COL32(58, 79, 111, 255));
+        else if (hovered) drawList->AddRectFilled({fullMin.x, listY}, {fullMin.x + listWidth, rowBottom}, IM_COL32(48, 48, 48, 255));
+        float const textY = listY + (row.height - ImGui::GetFontSize()) * 0.5f;
+        std::string label;
         if (row.kind == editing::model::TrackRowKind::Camera) {
-            ImGui::PushID(row.id.c_str());
-            std::string label = "    " + row.name;
+            label = "    " + row.name;
             if (row.cameraIndex == 0) label = std::string(mCamerasExpanded ? "v  Cameras (" : ">  Cameras (") + std::to_string(project->cameras.size()) + ")   +    " + row.name;
-            if (ImGui::Selectable(label.c_str(), selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedCamera{row.id.substr(7)});
-            if (row.cameraIndex == 0 && ImGui::IsItemClicked(ImGuiMouseButton_Left) && ImGui::GetMousePos().x < fullMin.x + 100.0f) mCamerasExpanded = !mCamerasExpanded;
-            ImGui::PopID();
+            if (clicked) editor.selection().select(editing::model::SelectedCamera{row.id.substr(7)});
+            if (row.cameraIndex == 0 && clicked && ImGui::GetMousePos().x < fullMin.x + 100.0f) mCamerasExpanded = !mCamerasExpanded;
         } else if (row.kind == editing::model::TrackRowKind::Sequence) {
-            if (ImGui::Selectable("O  Camera Sequence", selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedSequence{});
+            label = "O  Camera Sequence";
+            if (clicked) editor.selection().select(editing::model::SelectedSequence{});
         } else if (row.kind == editing::model::TrackRowKind::WorldActor) {
-            if (ImGui::Selectable("O  World Actor", selected, 0, {listWidth, row.height})) editor.selection().select(editing::model::SelectedWorldActor{});
+            label = "O  World Actor";
+            if (clicked) editor.selection().select(editing::model::SelectedWorldActor{});
         }
-        ImGui::PopStyleColor(2);
-        if (row.locked) drawList->AddText({fullMin.x + listWidth - 36.0f, listY + 5.0f}, IM_COL32(140, 140, 140, 255), "LOCK");
+        drawList->AddText({fullMin.x + 12.0f, textY}, IM_COL32(210, 210, 210, 255), label.c_str());
+        if (row.locked) drawList->AddText({fullMin.x + listWidth - 48.0f, textY}, IM_COL32(140, 140, 140, 255), "LOCK");
         listY = rowBottom + 2.0f;
     }
     ImGui::EndChild();

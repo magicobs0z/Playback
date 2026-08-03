@@ -241,7 +241,7 @@ struct ImGuiRenderer::Impl {
         ImFont*    font           = fontPathString.empty() ? nullptr
                                                            : io.Fonts->AddFontFromFileTTF(
                                                     fontPathString.c_str(),
-                                                    14.0f,
+                                                    18.0f,
                                                     nullptr,
                                                     io.Fonts->GetGlyphRangesChineseSimplifiedCommon()
                                                 );
@@ -254,7 +254,7 @@ struct ImGuiRenderer::Impl {
         static const ImWchar iconRange[]{0xe000, 0xe6ff, 0};
         auto const           iconPath =
             Playback::getInstance().getSelf().getModDir() / "resource_packs" / "playback-ui" / "fonts" / "lucide.ttf";
-        if (!io.Fonts->AddFontFromFileTTF(iconPath.string().c_str(), 14.0f, &cfg, iconRange)) {
+        if (!io.Fonts->AddFontFromFileTTF(iconPath.string().c_str(), 18.0f, &cfg, iconRange)) {
             getLogger().warn("Unable to load replay icon font from {}", iconPath);
         }
         ImGui::StyleColorsDark();
@@ -552,7 +552,7 @@ struct ImGuiRenderer::Impl {
         if (!fontPathString.empty()) {
             font = io.Fonts->AddFontFromFileTTF(
                 fontPathString.c_str(),
-                14.0f,
+                18.0f,
                 nullptr,
                 io.Fonts->GetGlyphRangesChineseSimplifiedCommon()
             );
@@ -572,7 +572,7 @@ struct ImGuiRenderer::Impl {
             static const ImWchar iconRange[]{0xe000, 0xe6ff, 0};
             auto const iconPath = Playback::getInstance().getSelf().getModDir() / "resource_packs" / "playback-ui"
                                 / "fonts" / "lucide.ttf";
-            if (!io.Fonts->AddFontFromFileTTF(iconPath.string().c_str(), 14.0f, &cfg, iconRange)) {
+            if (!io.Fonts->AddFontFromFileTTF(iconPath.string().c_str(), 18.0f, &cfg, iconRange)) {
                 getLogger().warn("Unable to load replay icon font from {}", iconPath);
             }
         }
