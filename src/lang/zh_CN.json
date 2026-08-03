@@ -48,6 +48,30 @@
                 "jumpToEnd": "跳至结尾",
                 "ticks": "{} / {} 游戏刻"
             }
+        },
+        "replayBrowser": {
+            "title": "回放列表",
+            "unknown": "未知",
+            "unknownWorld": "未知世界",
+            "duration": "{} 分 {} 秒",
+            "previewUnavailable": "暂无缩略图",
+            "empty": "没有回放文件",
+            "importFirst": "导入第一个回放",
+            "visibleCount": "共 {} 个回放文件",
+            "fileCount": "回放文件：{}",
+            "selectedCount": "已选择 {} 个文件",
+            "selectForDetails": "选择一个回放以查看详细信息",
+            "pathValue": "路径：{}",
+            "problemValue": "异常：{}",
+            "openDialog": {"replayFiles": "回放文件"},
+            "navigation": {"back": "返回主菜单", "search": "搜索回放文件", "import": "导入", "importTooltip": "导入回放文件", "filter": "筛选", "sort": "排序", "grid": "平铺", "list": "列表", "switchToGrid": "切换到平铺视图", "switchToList": "切换到列表视图", "refresh": "刷新回放列表", "settings": "设置", "settingsUnavailable": "回放目录设置暂不可用"},
+            "filter": {"all": "全部", "playable": "仅可播放", "broken": "仅不可用"},
+            "sort": {"name": "名称", "world": "世界", "duration": "时长", "size": "大小", "date": "日期", "ascending": "升序", "descending": "降序"},
+            "field": {"name": "名称", "world": "世界", "duration": "时长", "size": "大小", "modified": "修改时间", "fileSize": "文件大小", "fileFormat": "文件格式", "fileName": "文件名", "filePath": "文件路径"},
+            "action": {"openReplay": "打开回放", "copyPath": "复制路径", "showInFolder": "在文件夹中显示", "delete": "删除", "open": "打开", "edit": "编辑"},
+            "dialog": {"cancel": "取消", "ok": "确定", "operationFailed": "回放操作失败", "delete": {"title": "删除回放", "confirm": "确定删除选中的回放文件吗？", "irreversible": "此操作无法撤销", "confirmButton": "确认删除"}, "rename": {"title": "编辑回放名称", "description": "修改名称会同时更新回放元数据与文件名", "save": "保存"}},
+            "problem": {"missingMetadata": "缺少 metadata.json", "invalidMetadata": "无法解析回放元数据：{}"},
+            "error": {"archiveMissingEntry": "回放归档中缺少 {}", "invalidImportFile": "请选择有效的 .playback 或 .zip 回放文件", "invalidArchive": "文件不是有效的回放归档", "fileNotFound": "回放文件不存在", "openFailed": "启动回放会话失败", "showInFolderFailed": "无法在文件资源管理器中显示回放", "emptyName": "回放名称不能为空", "renameMissingMetadata": "回放归档中缺少 metadata.json，无法重命名", "parseMetadata": "无法解析回放元数据：{}", "renameFile": "重命名文件失败：{}"}
         }
     }
 }
