@@ -1,6 +1,7 @@
 #include "DetailsPanel.h"
 
 #include "playback/editor/ui/ReplayEditor.h"
+#include "playback/editor/ui/components/PropertyControls.h"
 
 #include "imgui.h"
 
@@ -66,13 +67,13 @@ void DetailsPanel::draw() {
     }
 
     auto const& selection = editor.selection();
-    ImGui::TextUnformatted("Details");
-    ImGui::Separator();
+    char search[128]{};
+    property::beginInspector("Details", "Property Inspector");
+    property::searchBar("##details-search", "Search properties", search, sizeof(search));
 
     // ===== Camera Sequence (overview) =====
     if (selection.getAs<editing::model::SelectedSequence>()) {
-        ImGui::TextUnformatted("Camera Sequence");
-        ImGui::Separator();
+        if (property::beginSection("Camera Sequence")) {
         ImGui::Text("Duration: %s", formatTick(project->totalTicks).c_str());
         ImGui::Text("Segments: %zu", project->sequence.size());
         int unbound = 0;
@@ -86,7 +87,7 @@ void DetailsPanel::draw() {
         } else {
             ImGui::TextColored(ImVec4(0.47f, 0.78f, 0.51f, 1.0f), "All segments bound.");
         }
-        ImGui::Separator();
+        property::separator();
         for (auto const& segment : project->sequence) {
             auto const* camera = findById(project->cameras, segment.cameraId);
             char const* label = camera ? camera->name.c_str()
@@ -96,10 +97,12 @@ void DetailsPanel::draw() {
             }
         }
         ImGui::Spacing();
-        if (ImGui::Button("Split at Playhead", {-1.0f, 0.0f})) {
+        if (property::actionButton("Split at Playhead")) {
             EditorAction action{EditorActionType::SplitSequence};
             action.tick = state.currentTick;
             submit(std::move(action));
+        }
+        property::endSection();
         }
         return;
     }
@@ -113,8 +116,7 @@ void DetailsPanel::draw() {
         }
         bool const isFirst = &project->sequence.front() == segment;
         bool const isLast = &project->sequence.back() == segment;
-        ImGui::TextUnformatted("Sequence Segment");
-        ImGui::Separator();
+        if (property::beginSection("Sequence Segment")) {
         ImGui::Text("Range: %s - %s", formatTick(segment->startTick).c_str(), formatTick(segment->endTick).c_str());
         ImGui::Text("Duration: %d ticks", segment->endTick - segment->startTick);
         ImGui::BeginDisabled(segment->locked);
@@ -156,18 +158,20 @@ void DetailsPanel::draw() {
             }
             ImGui::EndCombo();
         }
-        if (ImGui::Button("Split at Playhead", {-1.0f, 0.0f})) {
+        if (property::actionButton("Split at Playhead")) {
             EditorAction action{EditorActionType::SplitSequence};
             action.tick = state.currentTick;
             submit(std::move(action));
         }
-        if (ImGui::Button("Delete Segment", {-1.0f, 0.0f})) {
+        if (property::actionButton("Delete Segment")) {
             EditorAction action{EditorActionType::DeleteSequenceSegment};
             action.id = segment->id;
             submit(std::move(action));
         }
         ImGui::EndDisabled();
         if (segment->locked) ImGui::TextDisabled("Segment is locked.");
+        property::endSection();
+        }
         return;
     }
 

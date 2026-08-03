@@ -83,6 +83,32 @@ enum class EasingType : uint8_t {
     CubicBezier
 };
 
+enum class CameraPathType : uint8_t {
+    Linear = 0,
+    CubicBezier,
+    AutoSmooth
+};
+
+enum class CameraTransitionPreset : uint8_t {
+    Custom = 0,
+    LinearConstant,
+    CinematicEase,
+    ArcPushIn,
+    ArcPullOut,
+    OrbitPass,
+    WhipPan,
+    ZoomTransition
+};
+
+struct CameraMotionSegment {
+    CameraPathType pathType{CameraPathType::Linear};
+    CameraTransitionPreset preset{CameraTransitionPreset::LinearConstant};
+    Vec3 outControl{};
+    Vec3 inControl{};
+    bool useLookAlongPath{};
+    float fovPeakOffset{};
+};
+
 struct CameraKeyframe {
     std::string id;
     int tick{};
@@ -92,6 +118,7 @@ struct CameraKeyframe {
     EasingType easingType{EasingType::Linear};
     Vec2 bezierCtrl1{0.42f, 0.0f};
     Vec2 bezierCtrl2{0.58f, 1.0f};
+    CameraMotionSegment outgoingMotion{};
 };
 
 struct CameraEntity {
@@ -124,8 +151,10 @@ struct CameraSample {
 - `CameraEntity.id` 是唯一稳定标识；`SequenceSegment.cameraId` 只引用该 id，不引用可变的名称或数组下标。
 - `keys` 以 `tick` 升序保存，任意两个关键帧不得有相同 tick。
 - 同一 tick 再次创建关键帧时覆盖既有帧的完整机位，不增加关键帧数量。
-- `easingType` 和贝塞尔控制点属于区间起点，控制当前帧到下一帧；最后一帧保留字段但不参与区间计算。
+- `easingType`、时间贝塞尔控制点和 `outgoingMotion` 均属于区间起点，控制当前帧到下一帧；最后一帧保留字段但不参与区间计算。
 - 贝塞尔控制点的 x 坐标钳制至 `[0, 1]`，y 坐标允许超出该范围以支持过冲。
+- `outControl`、`inControl` 是 3D 三次贝塞尔的两个控制点，分别相对区间起点与终点的世界位置保存；`Linear` 忽略它们，`AutoSmooth` 由相邻关键帧自动计算，不持久化推导结果。
+- `fovPeakOffset` 是区间中点的临时 FOV 偏移，用于变焦类预设；起止帧的 FOV 永远以用户捕获或编辑的值为准。
 - `CameraKind::Keyframe` 使用 `keys`；其他 kind 的扩展字段不得改变 Keyframe 的时间语义。
 
 ### 2.3 自由机位创作流程

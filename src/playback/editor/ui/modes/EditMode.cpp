@@ -79,8 +79,7 @@ void EditMode::draw() {
         ImGui::SetNextWindowPos(ImVec2(detailsX, detailsY));
         ImGui::SetNextWindowSize(ImVec2(detailsWidth, detailsH));
         ImGui::Begin("##DetailsPanel", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar
-            | ImGuiWindowFlags_NoScrollWithMouse);
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
         editor.mDetailsPanel.draw();
         ImGui::End();
     }
