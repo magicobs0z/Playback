@@ -365,16 +365,21 @@ bool ReplaySession::setPaused(bool paused) {
 }
 
 bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov) {
-    (void)x;
-    (void)y;
-    (void)z;
-    (void)yaw;
-    (void)pitch;
-    (void)fov;
-    return false;
+    if (!mActive || !mReplayWorldJoined) return false;
+    std::scoped_lock lock(mEditorCameraOverrideMutex);
+    mEditorCameraOverride = {true, x, y, z, yaw, pitch, fov};
+    return true;
 }
 
-void ReplaySession::clearEditorCameraOverride() {}
+void ReplaySession::clearEditorCameraOverride() {
+    std::scoped_lock lock(mEditorCameraOverrideMutex);
+    mEditorCameraOverride.active = false;
+}
+
+EditorCameraOverrideState ReplaySession::snapshotEditorCameraOverride() const {
+    std::scoped_lock lock(mEditorCameraOverrideMutex);
+    return mEditorCameraOverride;
+}
 
 int ReplaySession::getTotalTicks() const { return std::max(0, mMeta.totalTicks); }
 

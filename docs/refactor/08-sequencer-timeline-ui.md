@@ -1,7 +1,7 @@
-# Sequencer 时间轴 UI（按 09 工作流 · 3+N 轨模型）
+# Sequencer 时间轴 UI（简化摄像机轨模型）
 
-> 本文件实现 [09-video-editing-workflow.md](09-video-editing-workflow.md) §2.1 所定义的时间轴 UI。
-> 核心变化：原"视频轨 / 相机轨 / Marker 轨"**3 类分组**改为 **"摄像机序列 + 世界Actor + 摄像机 + Marker" 4 类固定一级轨道**（3 条一级 + N 条用户摄像机轨），子Actor **不**生成行。
+> 本文件实现 [09-video-editing-workflow.md](09-video-editing-workflow.md) 所定义的时间轴 UI。
+> 时间轴只呈现摄像机编辑所需的轨道：默认一条摄像机轨；每台 `CameraEntity` 一条轨；摄像机序列按需出现；世界Actor 不生成时间轴行。
 
 ## 需求
 
@@ -11,42 +11,42 @@
 - 时间轴所有 UI 均嵌入 `EditMode` 分配的 Timeline 容器，不创建可移动、可缩放、可保存位置的独立 ImGui 窗口。
 - 时间轴自身与编辑器主布局解耦：轨道导航栏宽度由时间轴内部纵向分隔条控制；编辑器外层横向分隔条只控制 Timeline 总高度；Details 宽度只由编辑器外层纵向分隔条控制。
 - 所有文本，包括标尺、片段时长、轨道名、按钮标签、提示和菜单，字号不得低于 14px；图标按钮的可点击热区不得小于 28×28px。
-- **轨道组固定为 4 类**（按 [09 §2.1](09-video-editing-workflow.md)）：`Sequence` / `WorldActor` / `Cameras` / `Marker`。每类下挂的可见行数：
-  - `Sequence` = 1 行（顶轨）
-  - `WorldActor` = 1 行（中轨）
-  - `Cameras` = 0..N 行（底轨，按 `EditorStateExt.cameras` 数组顺序）
-  - `Marker` = 0..1 行（独立轨，可选）
+- 新建或加载未包含编辑器状态的工程时，自动创建 1 台自由摄像机 `Camera 1`；时间轴初始只有其对应的一条摄像机轨。
+- 每台 `CameraEntity` 在时间轴上恰好对应一条摄像机轨，按 `EditorStateExt.cameras` 的数组顺序显示；新增或删除摄像机时，轨道同步新增或移除。
+- `WorldActor` 继续承载回放源、子Actor 和时间映射，但不在轨道树或画布生成可见行。
+- 摄像机序列为可选的单行 `Sequence` 轨：用户可手动添加；摄像机从 1 台增加为 2 台时自动添加。已有序列不会因摄像机数量降回 1 台而自动删除。
+- 未创建摄像机序列时，只能存在 1 台摄像机；预览与导出均使用该唯一摄像机。存在多台摄像机时，摄像机序列必须存在，并在每个 tick 解析输出摄像机。
+- `Marker` = 0..1 行（独立可选轨），不属于摄像机轨模型。
 
 ### 四区布局
 
 | 区域 | 位置 | 默认尺寸 | 职责 |
 |---|---|---:|---|
 | 全局工具栏 | Timeline 顶部 | 38px 高 | 时间码、撤销/重做、吸附、缩放、视图选项 |
-| 轨道导航栏 | Timeline 左侧 | 260px 宽 | 搜索、添加轨道、轨道树（4 类）、分组折叠、轨道状态 |
-| 时间轴画布 | Timeline 右侧 | 剩余空间 | 标尺、序列段、世界Actor 段、关键帧、Marker、播放头、横向滚动 |
+| 轨道导航栏 | Timeline 左侧 | 260px 宽 | 搜索、添加摄像机序列、摄像机轨与轨道状态 |
+| 时间轴画布 | Timeline 右侧 | 剩余空间 | 标尺、可选序列段、摄像机关键帧、Marker、播放头、横向滚动 |
 | 传输控制栏 | Timeline 底部 | 34px 高 | 跳转、逐帧、播放/暂停、速度、循环 |
 
 ### 轨道导航栏
 
-- 顶部提供搜索框（按相机名 / 子Actor 名过滤）和视图选项按钮；**不**提供"添加轨道"按钮（`Sequence` / `WorldActor` 不可增删；`Cameras` 通过 Details 面板的 `[+ Add Free Camera]` 或子Actor 的"创建摄像机绑定"添加；详见 [09 §2.6](09-video-editing-workflow.md)）。
-- 轨道树按 4 类（`Sequence` / `WorldActor` / `Cameras` / `Marker`）进行**固定**分组：
-  - `Sequence` 组下**始终 1 行**（摄像机序列本身，**不可折叠为 0 行**；UI 上始终可见）
-  - `WorldActor` 组下**始终 1 行**（世界Actor 本身，**不可折叠为 0 行**）
-  - `Cameras` 组下 0..N 行（每行 = 1 台 `CameraEntity`）
-  - `Marker` 组下 0..1 行
+- 顶部提供搜索框（按摄像机名过滤）、`[+ 添加摄像机序列]` 和视图选项按钮。仅在未创建序列时启用添加序列；摄像机仍由 Details 面板的 `[+ Add Free Camera]` 或子Actor 的“创建摄像机绑定”添加。
+- 轨道树按 `Sequence`、`Cameras`、`Marker` 分组：
+  - `Sequence` 组下 0..1 行；仅在序列存在时显示，且可由用户手动删除。
+  - `Cameras` 组下始终至少 1 行；每行 = 1 台 `CameraEntity`，默认第一行是 `Camera 1`。
+  - `Marker` 组下 0..1 行。
+- `WorldActor` 和子Actor 不在轨道树显示；其属性和子Actor 树仍仅在 Details 面板使用。
 - 每行左侧显示类型图标和名称，右侧显示可见、锁定、静音等状态（按 [09 §2.14](09-video-editing-workflow.md) `TrackHeaderMenu`）。
 - 导航栏与画布使用同一份可见轨道行序列、行高和垂直滚动偏移，确保左右严格对齐。
 
 ### 时间轴画布
 
 - 标尺固定于画布顶部，按缩放级别显示刻度和不小于 14px 的时间标签。
-- **4 类内容共用**以 tick 为单位的水平坐标系：
-  - 序列段（`SequenceSegment`，蓝）—— 顶轨
-  - 世界Actor 段（`WorldActorSegment`，橙）—— 中轨
-  - 关键帧（`CameraKeyframe`，按 `CameraEntity.path` 圆点）—— 底轨每行
+- 所有可见轨道内容共用以 tick 为单位的水平坐标系：
+  - 序列段（`SequenceSegment`，蓝）—— 可选顶轨
+  - 关键帧（`CameraKeyframe`，按 `CameraEntity.keys` 圆点）—— 每台摄像机一行
   - Marker（垂直细线 + 标签）—— Marker 轨
 - 播放头跨越标尺和全部可见轨道行；点击标尺或画布空白处可定位播放头。
-- **子Actor 不画在画布**；展开在 Details 面板的 `SubActorTree`（按 Default / Players / Creatures / Entities 折叠），详见 [09 §2.6](09-video-editing-workflow.md)。
+- `WorldActor` 段和子Actor 均不画在画布；子Actor 展开在 Details 面板的 `SubActorTree`（按 Default / Players / Creatures / Entities 折叠）。
 - 画布内容裁剪到画布矩形内，不能绘制到导航栏、工具栏、传输控制栏或编辑器外层面板。
 - 画布底部提供独立横向滚动条；滚动只影响画布时间坐标，不移动导航栏。
 
@@ -66,8 +66,8 @@
 ### 非目标
 
 - 不实现视频导出、编码、离线渲染或导出任务调度（[05](05-render-pipeline.md) 负责）。
-- 不实现**新建 Sequence / WorldActor 行**的入口（**始终各 1 行**，固定结构）。
-- 不实现新增 / 删除 Sequence / WorldActor 行的命令。
+- 不实现 WorldActor 行及其段的时间轴呈现、命中或编辑入口。
+- 不实现摄像机轨的独立新建 / 删除命令；摄像机轨随 `CameraEntity` 生命周期同步变化。
 - 不实现新增 Marker 轨道的命令（**只有 1 个独立 Marker 轨**，与条目无关）。
 - 不实现新的回放数据格式；继续使用 `EditorStateExt`（v3 schema）、`EditorBridge` 和已有命令栈。
 
@@ -79,8 +79,8 @@
 |---|---|---|
 | `TimelinePanel` | 协调四区布局、统一可见轨道行、处理 Timeline 内部状态 | `EditorStateExt`、`EditorBridge`、子模型 |
 | `TimelineViewportState` | 保存缩放、水平偏移、吸附开关、轨道栏宽度比例 | ImGui 输入、编辑器偏好 |
-| `TrackTreeModel` | 将视频轨道、相机轨道、Marker 轨道转换为可见轨道行，维护搜索和折叠状态 | `EditorStateExt` |
-| `TrackListPanel` | 绘制搜索、添加轨道、分组和轨道状态 | `TrackTreeModel` |
+| `TrackTreeModel` | 将可选 Sequence、每台 Camera 和 Marker 转换为可见轨道行，维护搜索和折叠状态 | `EditorStateExt` |
+| `TrackListPanel` | 绘制搜索、添加摄像机序列、分组和轨道状态 | `TrackTreeModel` |
 | `TimelineCanvas` | 绘制标尺、轨道内容、播放头、滚动条与画布命中 | `TrackTreeModel`、`TimelineViewportState` |
 | `TransportControls` | 绘制传输控制并调用已有 Bridge 操作 | `EditorBridge` |
 
@@ -107,7 +107,7 @@ flowchart LR
 
 1. `TimelinePanel` 读取 Timeline 外层内容矩形，减去 38px 工具栏和 34px 传输控制栏，得到中间工作区。
 2. `TimelineViewportState.trackListWidthRatio` 将中间工作区切分为轨道导航栏与画布；内部纵向分隔条位于二者边界。
-3. `TrackTreeModel` 计算可见轨道行，并给两侧提供相同的行顺序、行高和垂直偏移。
+3. `TrackTreeModel` 计算可见轨道行，并给两侧提供相同的行顺序、行高和垂直偏移：`Sequence`（存在时）→ `Cameras` → `Marker`（存在时）。
 4. `TimelineCanvas` 在画布裁剪矩形内，将 tick 映射为 `canvasLeft + tick * pixelsPerTick - horizontalScroll`。
 5. 时间轴内部的所有自绘内容使用显式的 `ImGui::GetFont(), 14.0f` 或更大字号。
 
@@ -134,22 +134,22 @@ struct TimelineBackendActions {
 
 ## 执行计划
 
-1. 创建 `TimelineViewportState`、`TrackTreeModel` 和时间轴 UI 子组件，迁移现有 TimelinePanel 的缩放、播放头、片段、关键帧和 Marker 绘制逻辑。
-2. 将 TimelinePanel 改为四区固定布局，在 Timeline 内接入独立纵向分隔条；将外层高度控制与内部宽度控制完全分离。
-3. 用 `TrackTreeModel` 统一生成左右共享的可见轨道行，完成搜索、分组折叠、轨道状态展示及画布同步隐藏。
-4. 实现画布裁剪、标尺、横向滚动条、播放头、片段/关键帧/Marker 命中与既有 Bridge 编辑操作。
-5. 实现传输控制栏并将无后端接口的功能以禁用控件和 `TimelineBackendActions` 预留边界呈现。
-6. 将所有自绘文字改为显式 14px 以上字体，检查图标按钮热区。
-7. 扩展布局偏好读写，持久化时间轴内部宽度、缩放与滚动状态。
-8. 回归验证：不同窗口尺寸、三类分隔条独立拖动、轨道折叠/搜索、片段编辑、播放控制、重启恢复与字体下限。
-9. 运行 `xmake build playback`、源文件诊断和 `git diff --check`。
+1. 调整默认工程初始化：创建自由摄像机 `Camera 1`，不创建 Sequence；保留 WorldActor 的后台回放数据与时间映射。
+2. 调整 Camera 生命周期：新增 Camera 时新增对应轨道；第二台 Camera 创建后确保 Sequence 存在；删除 Camera 时移除对应轨道，并只在用户显式操作时删除 Sequence。
+3. 用 `TrackTreeModel` 统一生成左右共享的可见轨道行：可选 `Sequence`、至少一条 `Camera`、可选 `Marker`；移除 `WorldActor` 行。
+4. 调整画布绘制与命中：删除 WorldActor 段绘制和编辑，保留可选序列段、摄像机关键帧、Marker、标尺、播放头与横向滚动。
+5. 在轨道导航栏接入手动添加 / 删除摄像机序列的操作；多摄像机时自动创建序列，避免无序列的多机位输出。
+6. 回归验证：新建工程、首台 Camera、添加第二台 Camera、删除回单台 Camera、手动添加 / 删除 Sequence、关键帧编辑、播放控制、重启恢复与字体下限。
 
 ## 验收标准
 
 - 时间轴始终为单一嵌入式 Sequencer 工作区，不出现独立 ImGui 时间轴窗口。
-- 四区边界清晰，轨道导航栏与画布轨道行逐行对齐。
+- 四区边界清晰，轨道导航栏与画布中可选 Sequence、每台 Camera、Marker 逐行对齐。
 - 调整任一分隔条时，只有其所属的一个尺寸比例变化。
 - 左侧轨道导航栏固定，画布横向滚动时不移动；片段和关键帧不越过画布裁剪边界。
-- 已存在的播放、定位、速度、撤销、重做、切片、删除片段、关键帧和 Marker 操作保持可用。
+- 默认新工程只显示 `Camera 1` 一条摄像机轨；WorldActor 不显示为时间轴行。
+- 每台 Camera 都有唯一对应的摄像机轨，新增和删除 Camera 后轨道集合同步更新。
+- 第二台 Camera 创建后自动存在 Sequence；单台 Camera 时允许用户手动添加或删除 Sequence，自动创建的 Sequence 不会因降回单台 Camera 而自动删除。
+- 已存在的播放、定位、速度、撤销、重做、关键帧和 Marker 操作保持可用；Sequence 存在时其分段编辑保持可用。
 - 没有后端支持的控件不会显示为可执行操作。
 - 所有用户可见文本不低于 14px。

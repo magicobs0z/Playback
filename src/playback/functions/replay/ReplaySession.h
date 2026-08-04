@@ -29,6 +29,16 @@ enum class MinecraftPacketIds : int;
 
 namespace playback::functions {
 
+struct EditorCameraOverrideState {
+    bool  active{};
+    float x{};
+    float y{};
+    float z{};
+    float yaw{};
+    float pitch{};
+    float fov{90.0f};
+};
+
 class ReplaySession {
 private:
     static constexpr size_t MAX_LEVEL_CHUNKS_IN_FLIGHT          = 64;
@@ -161,6 +171,8 @@ private:
     std::weak_ptr<MinecraftScreenModel> mScreenModel;
     Player*                             mReplayPlayer   = nullptr;
     LegacyClientNetworkHandler*         mNetworkHandler = nullptr;
+    mutable std::mutex                   mEditorCameraOverrideMutex;
+    EditorCameraOverrideState            mEditorCameraOverride;
 
 public:
     bool mIsProcessingSnapshot = false;
@@ -264,6 +276,7 @@ public:
 
     bool setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov);
     void clearEditorCameraOverride();
+    [[nodiscard]] EditorCameraOverrideState snapshotEditorCameraOverride() const;
 
     [[nodiscard]] bool isInjectingPacket(Packet const* packet) const {
         return packet && mInjectingPacket.load(std::memory_order_acquire) == packet;

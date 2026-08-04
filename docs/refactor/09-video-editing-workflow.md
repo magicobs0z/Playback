@@ -1,7 +1,7 @@
-# 09 · 视频编辑工作流（3 条一级轨道模型）
+# 09 · 视频编辑工作流（简化摄像机时间轴模型）
 
 > 入口：`src/playback/refactor/video-editing/`
-> 角色：把"以视频轨为中心"的多剪辑模型改为"**摄像机序列 + 世界Actor + 摄像机**"3 条一级轨道的工作流，对齐 UE5 Sequencer 视觉（参考 `docs/refactor/08-sequencer-timeline-ui.md` 顶栏 / 轨道导航 / 画布 / 传输栏四区），并明确 **导出 = 按序列采集世界Actor 的镜头**。
+> 角色：把"以视频轨为中心"的多剪辑模型改为以**摄像机轨**为中心的工作流：每台摄像机一条轨，摄像机序列按需出现，世界Actor 只作为后台回放源。时间轴沿用 UE5 Sequencer 四区视觉（参考 `docs/refactor/08-sequencer-timeline-ui.md`），并明确多摄像机导出 = 按序列采集世界Actor 的镜头。
 > 本文是**工作流单一权威说明**；[01](01-editor-architecture.md) / [04](04-video-editing.md) / [06](06-data-persistence.md) / [08](08-sequencer-timeline-ui.md) 均以本文为准。
 
 ## 一、需求（Requirements）
@@ -10,17 +10,17 @@
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| VW-1 | 时间轴**只有 3 条一级轨道**（自上而下）：**摄像机序列** / **世界Actor** / **摄像机** | P0 |
-| VW-2 | 默认状态下只存在 **摄像机序列** 与 **世界Actor** 两条；**摄像机** 数量为 0，由用户手动添加 | P0 |
-| VW-3 | **摄像机序列** 是一条**连续、占满整个时间轴**的轨道，可被 split 为多段 | P0 |
-| VW-4 | 摄像机序列的**每一段**必须**绑定到一台摄像机**；未绑定时回退到"列表中第 1 台摄像机" | P0 |
-| VW-5 | 选中摄像机序列时，预览按**序列段顺序**播放视频：每段用所绑定摄像机的当前参数去拍世界Actor | P0 |
-| VW-6 | 导出（File > Export…）的最终视频**由摄像机序列定义**：序列决定镜头与硬切边界，WorldActor 决定时间轴到回放源 tick 的映射及画面内容 | P0 |
-| VW-7 | **世界Actor** 即"回放文件本体"；默认填满整个时间轴，可被 split / trim / 变速 | P0 |
-| VW-8 | 世界Actor 自身可调整**播放速度**（speed），可整段 trim 头尾，可 split 多段；它是时间轴到回放源 tick 的唯一映射器 | P0 |
+| VW-1 | 时间轴默认只显示 1 条摄像机轨，对应自动创建的自由摄像机 `Camera 1` | P0 |
+| VW-2 | 每台 `CameraEntity` 在时间轴上有且仅有 1 条摄像机轨；轨道按 `cameras` 数组顺序显示 | P0 |
+| VW-3 | **摄像机序列**是可选单行轨：用户可手动添加；摄像机数量从 1 增至 2 时自动添加 | P0 |
+| VW-4 | 摄像机序列存在时连续填满时间轴，可被 split 为多段；每段绑定一台摄像机，未绑定时回退到列表中第 1 台 | P0 |
+| VW-5 | 无摄像机序列时仅允许 1 台摄像机，预览与导出均使用该唯一摄像机；有序列时按序列段顺序预览与导出 | P0 |
+| VW-6 | 多摄像机导出的最终视频由摄像机序列定义：序列决定镜头与硬切边界，WorldActor 决定时间轴到回放源 tick 的映射及画面内容 | P0 |
+| VW-7 | **世界Actor** 即回放文件本体，只作为后台回放源、子Actor 容器与时间映射器，不在时间轴显示轨道或片段 | P0 |
+| VW-8 | 世界Actor 保持时间轴到回放源 tick 的唯一映射；本次时间轴不提供其 split、trim 或变速编辑入口 | P0 |
 | VW-9 | 世界Actor 解析出 N 个 **子Actor**，按**类别**（Default / Players / Creatures / Entities）折叠；UI 默认折叠，可在 Details 面板展开 | P0 |
 | VW-10 | 可为**玩家 / 生物**等子Actor 一键 **"创建摄像机绑定"**；同一子Actor可创建多台具有不同视角参数的绑定摄像机，生成的摄像机属于"摄像机"组并自动出现在序列绑定列表中 | P0 |
-| VW-11 | **摄像机**（Cameras）= 用户手动添加或由绑定生成的 Camera 实体；每条 Camera 在时间轴上是**独立的一级轨道**（行） | P0 |
+| VW-11 | **摄像机**（Cameras）= 自动创建的默认 Camera、用户手动添加或由绑定生成的 Camera 实体；每条 Camera 在时间轴上是独立轨道（行） | P0 |
 | VW-12 | 摄像机支持 4 种 kind：**Keyframe**（关键帧）/ **Path**（3D 样条）/ **Rig**（运动原语）/ **Preset**（预设） | P0 |
 | VW-13 | 摄像机支持**关键帧**编辑：插值（position / rotation / fov）、easing、关键帧 CRUD | P0 |
 | VW-14 | Details 面板对世界Actor 内部的子Actor 提供**属性编辑**（位置、状态、装备、绑定等） | P1 |
@@ -30,7 +30,7 @@
 
 ### 1.2 非功能性需求
 
-- **轨道数上限**：1 条摄像机序列 + 1 条世界Actor + ≤ 16 条摄像机
+- **轨道数上限**：0..1 条摄像机序列 + 1..16 条摄像机；WorldActor 不占时间轴行
 - **摄像机序列段数**：≤ 256
 - **世界Actor 段数**：≤ 32
 - **关键帧 / 路径点**：单摄像机 ≤ 1024
@@ -55,26 +55,20 @@
 +-- 顶工具栏（38px）：时间码 · 撤销/重做 · 吸附 · 缩放 · 视图选项 --+
 |  00:01:23.456 / 00:05:00.000  |  [↶] [↷]  [⚲]  [- 1x +]  [⚙]    |
 +-- 左侧导航（260px） -----+-- 时间轴画布（剩余） ---------------+
-| [搜索] [+ Add Track]      | 标尺 0:00  0:30  1:00  1:30  2:00   |
-| ▾ Camera Sequence (S)     |==================================== |
-|   [bind]  Segment A (Cam0)| [== Segment A ==][Seg B][=== C ===]|
-|   [bind]  Segment B (Cam2)|                                      |
-| ▾ World Actor (W)         | [==== WorldActor A ===][== B ==]    |
-|   ▸ Default               |   (子Actor 折叠在 Details 面板)      |
-|   ▸ Players               |                                      |
-|   ▸ Creatures             |                                      |
-|   ▸ Entities              |                                      |
+| [搜索] [+ Add Sequence]   | 标尺 0:00  0:30  1:00  1:30  2:00   |
+| ▾ Camera Sequence (可选)  |==================================== |
+|   [bind] Segment A (Cam1) | [== Segment A ==][Seg B][=== C ===]|
 | ▾ Cameras (N)             |                                      |
-|   [icon] Cam0 (Main)      | ===●=====●=====●=====●=====●===     |
-|   [icon] Cam1 (Player1)   | ======●=====●=====●====              |
+|   [icon] Camera 1         | ===●=====●=====●=====●=====●===     |
+|   [icon] Camera 2         | ======●=====●=====●====              |
 +---------------------------+--------------------------------------+
 +-- 传输栏（34px）：[⏮] [◀] [▶/⏸] [▶] [⏭]  1.0x  [↻] ------------+
 ```
 
 > **关键视觉规则**：
-> - 摄像机序列（S）= 顶轨，**始终存在**，整条画布；分段颜色按"绑定摄像机"着色。
-> - 世界Actor（W）= 中轨，**始终存在**，整条画布；分段颜色 = 回放原色。
-> - 摄像机（C）= 底部 N 条用户轨道（0..N）；**默认 0 条**。
+> - 摄像机序列（S）= 可选顶轨；手动添加或第二台 Camera 创建时出现，分段颜色按绑定摄像机着色。
+> - 世界Actor（W）= 后台回放源，不显示为时间轴轨或段。
+> - 摄像机（C）= 每台 Camera 一条轨；默认自动创建 `Camera 1`，因此至少 1 条。
 > - 画布只画"轨道本身 + 段/关键帧/Marker"；子Actor 列表**不**展开成新轨道，**只在 Details 面板**。
 
 ### 2.2 三大条目数据模型
@@ -150,10 +144,11 @@ struct SubActor {
 
 **关键不变量**：
 
-- `sequence` 与 `WorldActor.segments` 均首尾相接覆盖 `[0, totalTicks]`，无空隙、无重叠；split 只拆分当前段。
-- `trim` 调整当前段与相邻段的共享边界，不能产生空隙或重叠；唯一段不可删除，删除首尾段时相邻段扩展到时间轴边界。
+- `sequence` 不存在或首尾相接覆盖 `[0, totalTicks]`，无空隙、无重叠；split 只拆分当前段。
+- 用户删除 Sequence 时清空 `sequence`；其存在时 trim 调整当前段与相邻段共享边界，不能产生空隙或重叠。
 - `WorldActorSegment` 是时间轴到回放源 tick 的唯一映射器：`sourceTick + floor((timelineTick - startTick) * speed)`；摄像机序列不重映射回放时间。
 - `SequenceSegment.cameraId == ""` 时回退到 `Cameras[0]`，渲染层兜底，不抛错。
+- `cameras` 始终至少包含 `Camera 1`；删除前需保证至少保留一台 Camera。摄像机数量从 1 增至 2 时自动建立默认 Sequence；自动建立的 Sequence 以后不会因摄像机数量降回 1 而自动删除。
 - `CameraEntity.bindingEntityUuid != ""` 时该 Camera 是"绑定子Actor 的"；一个子Actor可关联多台 Camera，UI 上显示 `[bound]` 角标。
 
 ### 2.3 `EditorStateExt`（扩展）
@@ -170,10 +165,10 @@ struct EditorStateExt {
     bool  playing{};
     float playbackSpeed{1.0f};
 
-    // ====== 新工作流：3 条一级轨道 ======
-    WorldActor worldActor;                            // 中轨（始终存在）
-    std::vector<SequenceSegment> sequence;            // 顶轨（始终 1+ 段）
-    std::vector<CameraEntity>    cameras;             // 底轨（0..N）
+    // ====== 简化时间轴：可选序列 + 摄像机轨 ======
+    WorldActor worldActor;                            // 后台回放源，不生成时间轴行
+    std::vector<SequenceSegment> sequence;            // 可选顶轨（空或连续 1+ 段）
+    std::vector<CameraEntity>    cameras;             // 每台一行（1..N，默认 Camera 1）
     int activeCameraIndex{};                          // 当前激活的 Camera（详情面板）
 
     // 既有字段：Marker 仍可独立存在（不绑定任何条目）
@@ -185,18 +180,18 @@ struct EditorStateExt {
 };
 ```
 
-> **删除项**：`EditorStateExt.videoTracks`、`cameraTracks`、`transitions` 与旧 `Track / Clip / Transition` 模型整体下线。序列段之间只支持硬切，由"3 条一级轨道 + 内部段"显式表达。
+> **删除项**：`EditorStateExt.videoTracks`、`cameraTracks`、`transitions` 与旧 `Track / Clip / Transition` 模型整体下线。Sequence 存在时其段之间只支持硬切，由可选序列轨的内部段显式表达。
 
 ### 2.4 `TrackTreeModel`（统一轨道行）
 
-复用 [08 §2.1](08-sequencer-timeline-ui.md) 的 `TrackTreeModel`，但**行集合**改为固定：
+复用 [08 §2.1](08-sequencer-timeline-ui.md) 的 `TrackTreeModel`，但**行集合**为按需 Sequence 加上每台 Camera：
 
 ```cpp
 // models/TrackTreeModel.h
 struct VisibleRow {
-    enum class Kind { Sequence, WorldActor, Camera };
+    enum class Kind { Sequence, Camera };
     Kind        kind;
-    std::string id;             // sequence / worldActor / camera
+    std::string id;             // sequence / camera
     std::string name;
     int         subIndex{-1};   // 仅 Camera: 索引
     bool        active{};
@@ -206,7 +201,7 @@ struct VisibleRow {
 class TrackTreeModel {
 public:
     void rebuild(const EditorStateExt& s);
-    std::vector<VisibleRow> rows() const;  // 顺序：Sequence → WorldActor → Cameras
+    std::vector<VisibleRow> rows() const;  // 顺序：Sequence（存在时）→ Cameras
 };
 ```
 
@@ -220,10 +215,7 @@ public:
 | 摄像机序列 | 段 trim in/out | `TrimSequenceSegment` | 调整与相邻段共享的 `startTick/endTick` 边界 |
 | 摄像机序列 | 段绑摄像机 | `BindSequenceToCamera` | 改 `segment.cameraId` |
 | 摄像机序列 | 段删 | `DeleteSequenceSegment` | 段移除（左右两段合并） |
-| 世界Actor | 在 playhead 切 | `SplitWorldActorAtPlayhead` | `worldActor.segments` 插入新段 |
-| 世界Actor | 段 trim in/out | `TrimWorldActorSegment` | 调整与相邻段共享的 `startTick/endTick` 边界 |
-| 世界Actor | 段改 speed | `SetWorldActorSegmentSpeed` | 改 `segment.speed` |
-| 世界Actor | 段 ripple 删 | `RippleDeleteWorldActorSegment` | 段移除 + 后续段前移 |
+| 摄像机序列 | 手动添加 / 删除 | `AddCameraSequence` / `DeleteCameraSequence` | 建立默认连续段 / 清空 `sequence` |
 | 摄像机 | 新建自由机位 | `AddFreeCamera` | `cameras` push 一台 |
 | 摄像机 | 子Actor 创建绑定 | `CreateBindingCamera` | `cameras` push + `subActor.boundCameraIds` 追加，可重复创建不同视角 |
 | 摄像机 | 加关键帧 | `AddKeyframe` | `camera.keys` push |
@@ -242,8 +234,7 @@ public:
 | 无 | 空状态 + 提示 | — |
 | 序列（无段选） | 序列总览 | 段数、绑定覆盖率、警告（"X 段未绑定 Camera"） |
 | 序列段 | 段属性 | startTick / endTick / cameraId（下拉）/ locked |
-| WorldActor（无段选） | 子Actor 树（按类别折叠） | Default / Players / Creatures / Entities |
-| WorldActor 段 | 段属性 | startTick / endTick / sourceTick / speed / locked |
+| WorldActor | 子Actor 树（按类别折叠） | Default / Players / Creatures / Entities；不对应时间轴行 |
 | 子Actor | 子Actor 详情 | name / category（不可改）/ position / rotation / agentDetails（按类别动态字段）/ `[创建摄像机绑定]` 按钮 |
 | Camera | 摄影机总览 | name / kind / bindingEntityUuid / bindingMode / damping / 关键帧列表 |
 | 关键帧 | 关键帧属性 | tick / position / rotation / fov / easing |
@@ -251,7 +242,7 @@ public:
 
 ### 2.7 导出（File > Export…）语义
 
-**核心：导出 = 沿摄像机序列采集世界Actor**。
+**核心：单摄像机直接采集，多摄像机沿摄像机序列采集世界Actor**。
 
 ```cpp
 // 伪代码
@@ -259,14 +250,12 @@ RenderJob::runExport(EditorStateExt& e) {
     for (int frame = 0; frame < totalFrames; ++frame) {
         int timelineTick = exportStartTick + (frame * ticksPerSecond) / exportFps;
 
-        // 1) 找当前 active 的 SequenceSegment
+        // 1) 单摄像机直用；多摄像机由当前 SequenceSegment 选择
         const SequenceSegment* seg = findSegmentAt(e.sequence, timelineTick);
-        if (!seg) continue;
-
-        // 2) 找绑定的 Camera（未绑定 → 第一台）
-        const CameraEntity* cam = findCameraById(e.cameras, seg->cameraId);
-        if (!cam) cam = e.cameras.empty() ? nullptr : &e.cameras[0];
-        if (!cam) continue;  // 无摄像机可采
+        const CameraEntity* cam = seg
+            ? findCameraById(e.cameras, seg->cameraId)
+            : &e.cameras[0];
+        if (!cam) cam = &e.cameras[0];
 
         // 3) 世界Actor 是唯一时间映射器
         int sourceTick = WorldActorOps::mapTimelineToSourceTick(e.worldActor, timelineTick);
@@ -302,7 +291,7 @@ PreviewEngine::previewSequenceTick(EditorStateExt& e, int timelineTick) {
 }
 ```
 
-> **默认预览 = 摄像机序列驱动**。要"单独预览某台 Camera"时，**取消选中** 序列，选中 Camera 自身即可（[02 §2.12](02-camera-motion.md) 的 `sampleAt` 直接被 ViewportPanel 调用）。
+> **默认预览**：无 Sequence 时使用唯一 Camera；有 Sequence 时由 Sequence 驱动。要“单独预览某台 Camera”时，选中 Camera 自身即可。
 
 ### 2.9 数据流图
 
@@ -314,7 +303,7 @@ flowchart TB
         VP[ViewportPanel<br/>实时预览]
     end
     subgraph "Domain"
-        TTM[TrackTreeModel<br/>3 行 + N 摄像机行]
+        TTM[TrackTreeModel<br/>可选 Sequence + N 摄像机行]
         CM[CommandStack<br/>Undo/Redo]
         EB[EditorBridge]
     end
@@ -349,14 +338,14 @@ flowchart TB
 | # | 文件 | 内容 | 验证 |
 |---|---|---|---|
 | 1 | `models/SequenceSegment.h` | 摄像机序列段模型 + 序列化 | 编译 |
-| 2 | `models/WorldActorSegment.h` | 世界Actor 段模型 + 序列化 | 编译 |
+| 2 | `models/WorldActorSegment.h` | 世界Actor 后台时间映射模型 + 序列化 | 编译 |
 | 3 | `models/CameraEntity.h` | 摄像机实体（取代旧 CameraTrackExt 在 UI 层的位置） | 编译 |
 | 4 | `models/SubActor.h` | 子Actor 模型 + 类别枚举 | 编译 |
 | 5 | `models/WorldActor.h` | 世界Actor 容器（解析自 .playback） | 编译 |
 | 6 | `models/EditorStateExt.h` | 增 sequence / worldActor / cameras；移除旧 videoTracks / cameraTracks | 编译 + 旧数据回退 |
-| 7 | `models/TrackTreeModel.{h,cpp}` | 固定 3 行 + N 摄像机行 | 单测：rebuild 后行集合 |
-| 8 | `panels/TimelinePanel.cpp` | 渲染 3 一级轨道 + 段 + 关键帧；删除旧 video/camera 轨逻辑 | 手动：UI 正确 |
-| 9 | `panels/DetailsPanel.cpp` | 8 个上下文（序列/序列段/世界Actor/世界Actor 段/子Actor/Camera/关键帧/Marker） | 手动：每个上下文 |
+| 7 | `models/TrackTreeModel.{h,cpp}` | 可选 Sequence + 每台 Camera 一行；移除 WorldActor 行 | 单测：rebuild 后行集合 |
+| 8 | `panels/TimelinePanel.cpp` | 渲染可选 Sequence + 摄像机轨 + 关键帧；删除 WorldActor 轨逻辑 | 手动：UI 正确 |
+| 9 | `panels/DetailsPanel.cpp` | 序列/序列段/WorldActor/子Actor/Camera/关键帧/Marker 上下文 | 手动：每个上下文 |
 | 10 | `panels/ViewportPanel.cpp` | 默认从 sequence 驱动；选中 Camera 时直接用该 Camera | 手动：预览切换 |
 | 11 | `panels/SubActorTree.{h,cpp}`（新） | 子Actor 按类别折叠树 | 手动：折叠展开 |
 | 12 | `commands/SequenceCommands.{h,cpp}` | Split/Trim/Bind/Delete/Speed | 单测：execute/undo |
@@ -417,33 +406,34 @@ CameraEntity createBindingCamera(const SubActor& actor, const EditorStateExt& e)
 
 ### 3.3 关键不变量
 
-1. **3 条一级轨道永存**：序列 / 世界Actor 不可删；摄像机可 0..N。
-2. **序列填满 [0, totalTicks]**：split 后所有段首尾相接，无空隙。
-3. **世界Actor 段同约束**：同序列。
-4. **段未绑 Camera 不报错**：导出 / 预览兜底为 `cameras[0]`。
+1. **默认仅一条 Camera 轨**：自动创建 `Camera 1`；WorldActor 不显示为时间轴轨。
+2. **Camera 一对一轨道**：`cameras` 中每台 Camera 只对应一条轨，且至少保留一台。
+3. **Sequence 按需存在**：用户可手动添加 / 删除；第二台 Camera 创建时自动添加；自动添加后不随摄像机数量下降而删除。
+4. **Sequence 存在时填满 [0, totalTicks]**：split 后所有段首尾相接，无空隙。
+5. **单机位直出，多机位走 Sequence**：无 Sequence 时使用唯一 Camera；有 Sequence 时段未绑 Camera 兜底为 `cameras[0]`。
 5. **子Actor 类别不可改**：解析自 .playback；UI 只读 category。
 6. **绑定 Camera = cameras 成员**：用户加 Camera 时若选"绑定子Actor"，必须指定一个子Actor；同一子Actor可关联多台具有不同视角参数的 Camera。
 7. **迁移版本明确**：无 `editor` 节点时重建 v3 默认模型；v1/v2 经迁移后加载；v3 校验加载；未知未来版本拒绝加载并显示错误。
 8. **Command execute/undo 互逆**：undo 状态 = 执行前。
-9. **TrackTreeModel 顺序固定**：Sequence → WorldActor → Cameras（按 cameras 数组顺序）。
+9. **TrackTreeModel 顺序固定**：Sequence（存在时）→ Cameras（按 cameras 数组顺序）→ Marker（存在时）。
 
 ### 3.4 测试用例
 
 | ID | 用例 | 期望 |
 |---|---|---|
-| VW-T1 | 打开 .playback → 序列默认 1 段 [0, totalTicks] | cameras 空，段未绑 |
-| VW-T2 | 段未绑 + 导出 | 兜底 cameras[0]（空则报错对话框"无摄像机"） |
+| VW-T1 | 打开 .playback → 默认状态 | 自动创建 `Camera 1`；时间轴只显示其轨道；无 Sequence |
+| VW-T2 | 单摄像机导出 | 不依赖 Sequence，直接使用 `Camera 1` |
 | VW-T3 | split sequence at tick=1000 | 变 2 段 [0,1000) + [1000,totalTicks) |
 | VW-T4 | trim worldActor 段边界 +20 | 相邻段共享边界同步移动，覆盖不变 |
 | VW-T5 | 子Actor 树展开 Players | Details 面板出现按名字排序的玩家列表 |
 | VW-T6 | 玩家连续两次创建不同视角绑定 | cameras 多 2 台；subActor.boundCameraIds 含两台 Camera id |
-| VW-T7 | 序列段绑到新建 Camera | segment.cameraId 更新；导出用该 Camera |
-| VW-T8 | 删除 Camera | cameras 少 1；引用它的段变 cameraId="" |
+| VW-T7 | 添加第二台 Camera | 新 Camera 轨出现；自动建立连续的默认 Sequence |
+| VW-T8 | 删除 Camera 至只剩一台 | 对应 Camera 轨移除；Sequence 保留，直到用户手动删除 |
 | VW-T9 | 关键帧 CRUD | 关键帧点增删 + UI 重绘 |
 | VW-T10 | Undo CreateBindingCamera | cameras 恢复；只移除本次写入的 subActor.boundCameraIds 项 |
 | VW-T11 | 导出 = 沿序列渲染 | 导出视频按时序切镜头 |
 | VW-T12 | 字体下限 14px | grep 自绘 Text 不低于 14 |
-| VW-T13 | 旧 .playback（无 sequence/worldActor/cameras 字段）加载 | 重建：序列 1 段、世界Actor 1 段、cameras 空 |
+| VW-T13 | 旧 .playback（无 sequence/worldActor/cameras 字段）加载 | 重建：世界Actor 后台数据 + `Camera 1`，Sequence 为空 |
 
 ### 3.5 风险与回退
 
@@ -459,7 +449,7 @@ CameraEntity createBindingCamera(const SubActor& actor, const EditorStateExt& e)
 
 ### 被谁调用（上游）
 
-- **`panels/TimelinePanel`**：渲染 3 条一级轨道 + 段 + 关键帧
+- **`panels/TimelinePanel`**：渲染可选 Sequence、Camera 轨与关键帧
 - **`panels/DetailsPanel`**：上下文敏感字段编辑
 - **`panels/ViewportPanel`**：默认从 sequence 驱动预览
 - **`panels/SubActorTree`**（新）：子Actor 树

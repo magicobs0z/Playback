@@ -33,6 +33,7 @@ tests/
 *.vcxproj.user
 *.vcxproj.filters
 .superpowers/
+.dbg/
 
 # C++ / MSVC artifacts
 *.obj

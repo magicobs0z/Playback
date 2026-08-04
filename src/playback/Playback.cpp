@@ -3,6 +3,7 @@
 #include "playback/Config.h"
 #include "playback/Playback.h"
 #include "playback/command/Command.h"
+#include "playback/editor/camera-render/CameraRenderOverride.h"
 #include "playback/editor/ReplayUI.h"
 #include "playback/functions/action/Action.h"
 #include "playback/functions/record/ChunkMutationBarrier.h"
@@ -87,6 +88,13 @@ bool Playback::hook() {
         screen::hookMainMenu(false);
         return false;
     }
+    if (!editor::camera_render::hookCameraRenderOverride(true)) {
+        [[maybe_unused]] bool tickRemoved = functions::hookClientTick(false);
+        [[maybe_unused]] bool networkRemoved = functions::hookNetwork(false);
+        screen::hookMainMenu(false);
+        getSelf().getLogger().error("Unable to install camera render override hook");
+        return false;
+    }
 
     getEventListeners().emplace(
         ll::event::EventBus::getInstance().emplaceListener<ll::event::ClientCommandRegisterEvent>([this](auto&&) {
@@ -130,6 +138,7 @@ bool Playback::hook() {
 
 bool Playback::unhook() {
     if (!impl->mRuntimeInstalled) return true;
+    if (!editor::camera_render::hookCameraRenderOverride(false)) return false;
     if (!functions::hookClientTick(false)) return false;
     if (!functions::hookNetwork(false)) {
         bool tickRestored = functions::hookClientTick(true);
