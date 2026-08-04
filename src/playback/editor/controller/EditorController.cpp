@@ -57,7 +57,7 @@ void EditorController::ensureProject(int totalTicks) {
     mProject = {};
     mProject.version = 4;
     mProject.totalTicks = totalTicks;
-    mProject.sequence.push_back({"sequence", 0, totalTicks});
+    editing::CameraBindingOps::addFreeCamera(mProject, "Camera 1");
     mProject.worldActor.id = "worldActor";
     mProject.worldActor.name = "World Actor";
     mProject.worldActor.totalTicks = totalTicks;
@@ -78,6 +78,12 @@ void EditorController::applyEditorAction(EditorAction const& action) {
         break;
     case EditorActionType::AddFreeCamera:
         mCommandStack.push(CommandFactory::createAddFreeCamera(action.name), mProject);
+        break;
+    case EditorActionType::AddCameraSequence:
+        mCommandStack.push(CommandFactory::createAddCameraSequence(), mProject);
+        break;
+    case EditorActionType::DeleteCameraSequence:
+        mCommandStack.push(CommandFactory::createDeleteCameraSequence(), mProject);
         break;
     case EditorActionType::SplitSequence:
         mCommandStack.push(CommandFactory::createSplitSequence(action.tick), mProject);

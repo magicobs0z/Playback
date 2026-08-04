@@ -8,6 +8,8 @@
 
 namespace playback::editor::editing::command {
 
+std::unique_ptr<model::IEditCommand> CommandFactory::createAddCameraSequence() { return std::make_unique<AddCameraSequence>(); }
+std::unique_ptr<model::IEditCommand> CommandFactory::createDeleteCameraSequence() { return std::make_unique<DeleteCameraSequence>(); }
 std::unique_ptr<model::IEditCommand> CommandFactory::createSplitSequence(int atTick) { return std::make_unique<SplitSequenceAtPlayhead>(atTick); }
 std::unique_ptr<model::IEditCommand> CommandFactory::createTrimSequence(const std::string& id, int start, int end) { return std::make_unique<TrimSequenceSegment>(id, start, end); }
 std::unique_ptr<model::IEditCommand> CommandFactory::createDeleteSequenceSegment(const std::string& id) { return std::make_unique<DeleteSequenceSegment>(id); }

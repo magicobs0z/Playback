@@ -28,9 +28,7 @@ private:
     std::string mTrackSearch;
     bool mSnapEnabled{true};
     bool mCamerasExpanded{true};
-    bool mMarkersExpanded{};
     std::string mDraggingSegmentId;
-    bool mDraggingWorldActor{};
     bool mDraggingStart{};
     bool mDraggingPlayhead{};
     int mDragStartTick{};

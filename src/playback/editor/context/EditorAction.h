@@ -27,6 +27,8 @@ enum class EditorActionType {
     UndoEditorEdit,
     RedoEditorEdit,
     AddFreeCamera,
+    AddCameraSequence,
+    DeleteCameraSequence,
     SplitSequence,
     TrimSequence,
     DeleteSequenceSegment,

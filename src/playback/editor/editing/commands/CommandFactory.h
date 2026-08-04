@@ -16,6 +16,8 @@ namespace playback::editor::editing::command {
 
 class CommandFactory {
 public:
+    static std::unique_ptr<model::IEditCommand> createAddCameraSequence();
+    static std::unique_ptr<model::IEditCommand> createDeleteCameraSequence();
     static std::unique_ptr<model::IEditCommand> createSplitSequence(int atTick);
     static std::unique_ptr<model::IEditCommand> createTrimSequence(const std::string& id, int start, int end);
     static std::unique_ptr<model::IEditCommand> createDeleteSequenceSegment(const std::string& id);

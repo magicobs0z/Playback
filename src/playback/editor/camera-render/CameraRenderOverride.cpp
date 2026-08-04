@@ -9,11 +9,9 @@
 #include "mc/client/renderer/game/LevelRenderer.h"
 #include "mc/client/renderer/game/LevelRenderPreRenderUpdateParameters.h"
 #include "mc/deps/renderer/Camera.h"
-#include "mc/deps/ecs/gamerefs_entity/EntityContext.h"
-#include "mc/deps/minecraft_camera/components/CameraComponent.h"
 
-#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 
 namespace playback::editor::camera_render {
@@ -32,14 +30,14 @@ void applyOverride() {
 
     auto client = ll::service::getClientInstance();
     if (!client) return;
-    auto cameraEntity = client->getCameraEntity();
-    auto cameraContext = cameraEntity.lock();
-    if (!cameraContext) return;
-    auto camera = cameraContext->tryGetComponent<MinecraftCamera::CameraComponent>();
-    if (!camera) return;
 
-    camera->mPosition = glm::vec3{state.x, state.y, state.z};
-    camera->mOrientation = toOrientation(state.yaw, state.pitch);
+    auto& renderCamera = client->getCamera();
+    auto const orientation = toOrientation(state.yaw, state.pitch);
+    renderCamera.mPosition = glm::vec3{state.x, state.y, state.z};
+    renderCamera.mRight = orientation * glm::vec3{1.0f, 0.0f, 0.0f};
+    renderCamera.mUp = orientation * glm::vec3{0.0f, 1.0f, 0.0f};
+    renderCamera.mForward = orientation * glm::vec3{0.0f, 0.0f, 1.0f};
+    renderCamera.updateViewMatrixDependencies();
 }
 
 LL_TYPE_INSTANCE_HOOK(

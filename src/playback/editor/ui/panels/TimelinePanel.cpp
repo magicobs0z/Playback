@@ -19,7 +19,6 @@ constexpr ImU32 kBackground = IM_COL32(27, 27, 27, 255);
 constexpr ImU32 kSidebarBackground = IM_COL32(41, 41, 41, 255);
 constexpr ImU32 kLine = IM_COL32(73, 73, 73, 255);
 constexpr ImU32 kSequenceColor = IM_COL32(98, 98, 98, 255);
-constexpr ImU32 kWorldActorColor = IM_COL32(61, 82, 72, 255);
 constexpr ImU32 kCameraColor = IM_COL32(77, 63, 83, 255);
 
 bool iconButton(char const* id, char const* icon, char const* tooltip, bool enabled = true) {
@@ -91,7 +90,6 @@ void TimelinePanel::draw() {
 
     mTrackTree.setSearch(mTrackSearch);
     mTrackTree.setCamerasExpanded(mCamerasExpanded);
-    mTrackTree.setMarkerExpanded(mMarkersExpanded);
     mTrackTree.rebuild(*project);
     int displayTick = mPendingSeekTick >= 0 ? mPendingSeekTick : state.currentTick;
     if (mPendingSeekTick >= 0 && state.currentTick == mPendingSeekTick) mPendingSeekTick = -1;
@@ -116,26 +114,20 @@ void TimelinePanel::draw() {
     if (iconButton("redo", ICON_REDO, "Redo", state.canRedo)) submitEdit({EditorActionType::RedoEditorEdit});
     sameIcon();
     auto const& selection = editor.selection();
-    bool const splitWorld = selection.getAs<editing::model::SelectedWorldActor>() || selection.getAs<editing::model::SelectedWorldActorSegment>();
-    bool const canSplit = splitWorld || selection.getAs<editing::model::SelectedSequence>() || selection.getAs<editing::model::SelectedSequenceSegment>();
+    bool const canSplit = !project->sequence.empty() && (selection.getAs<editing::model::SelectedSequence>() || selection.getAs<editing::model::SelectedSequenceSegment>());
     if (iconButton("split", ICON_SPLIT, "Split at playhead", canSplit)) {
-        EditorAction action{splitWorld ? EditorActionType::SplitWorldActor : EditorActionType::SplitSequence};
+        EditorAction action{EditorActionType::SplitSequence};
         action.tick = state.currentTick;
         submitEdit(std::move(action));
     }
     sameIcon();
     bool const canDelete = selection.getAs<editing::model::SelectedSequenceSegment>()
-        || selection.getAs<editing::model::SelectedWorldActorSegment>()
-        || selection.getAs<editing::model::SelectedCamera>()
+        || (selection.getAs<editing::model::SelectedCamera>() && project->cameras.size() > 1)
         || selection.getAs<editing::model::SelectedKeyframe>();
     if (iconButton("delete", ICON_DELETE, "Delete selection", canDelete)) {
         if (auto const* sequenceSegmentSel = selection.getAs<editing::model::SelectedSequenceSegment>()) {
             EditorAction action{EditorActionType::DeleteSequenceSegment};
             action.id = sequenceSegmentSel->segmentId;
-            submitEdit(std::move(action));
-        } else if (auto const* worldSegmentSel = selection.getAs<editing::model::SelectedWorldActorSegment>()) {
-            EditorAction action{EditorActionType::RippleDeleteWorldActorSegment};
-            action.id = worldSegmentSel->segmentId;
             submitEdit(std::move(action));
         } else if (auto const* cameraSel = selection.getAs<editing::model::SelectedCamera>()) {
             EditorAction action{EditorActionType::DeleteCamera};
@@ -204,10 +196,14 @@ void TimelinePanel::draw() {
     std::snprintf(search, sizeof(search), "%s", mTrackSearch.c_str());
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(28, 122, 190, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(40, 142, 214, 255));
-    if (ImGui::Button("+ Add")) {
+    if (ImGui::Button("+ Camera")) {
         EditorAction action{EditorActionType::AddFreeCamera};
         action.name = "Camera " + std::to_string(project->cameras.size() + 1);
         submitEdit(std::move(action));
+    }
+    sameIcon();
+    if (iconButton("sequence", ICON_SPLIT, project->sequence.empty() ? "Add camera sequence" : "Delete camera sequence")) {
+        submitEdit({project->sequence.empty() ? EditorActionType::AddCameraSequence : EditorActionType::DeleteCameraSequence});
     }
     float const addWidth = ImGui::GetItemRectSize().x;
     ImGui::PopStyleColor(2);
@@ -224,7 +220,6 @@ void TimelinePanel::draw() {
         float const rowBottom = listY + row.height;
         auto const* selectedKeyframe = editor.selection().getAs<editing::model::SelectedKeyframe>();
         bool selected = (row.kind == editing::model::TrackRowKind::Sequence && editor.selection().getAs<editing::model::SelectedSequence>())
-            || (row.kind == editing::model::TrackRowKind::WorldActor && editor.selection().getAs<editing::model::SelectedWorldActor>())
             || (row.kind == editing::model::TrackRowKind::Camera && ((editor.selection().getAs<editing::model::SelectedCamera>() && editor.selection().getAs<editing::model::SelectedCamera>()->cameraId == row.id.substr(7)) || (selectedKeyframe && selectedKeyframe->trackId == row.id.substr(7))));
         ImGui::SetCursorScreenPos({fullMin.x, listY});
         ImGui::InvisibleButton(("##track-row-" + row.id).c_str(), {listWidth, row.height});
@@ -235,8 +230,7 @@ void TimelinePanel::draw() {
         float const textY = listY + (row.height - ImGui::GetFontSize()) * 0.5f;
         std::string label;
         if (row.kind == editing::model::TrackRowKind::Camera) {
-            label = "    " + row.name;
-            if (row.cameraIndex == 0) label = std::string(mCamerasExpanded ? "v  Cameras (" : ">  Cameras (") + std::to_string(project->cameras.size()) + ")   +    " + row.name;
+            label = row.name;
             if (clicked) {
                 auto const cameraId = row.id.substr(7);
                 editor.selection().select(editing::model::SelectedCamera{cameraId});
@@ -244,16 +238,12 @@ void TimelinePanel::draw() {
                 action.id = cameraId;
                 editor.submitAction(std::move(action));
             }
-            if (row.cameraIndex == 0 && clicked && ImGui::GetMousePos().x < fullMin.x + 100.0f) mCamerasExpanded = !mCamerasExpanded;
         } else if (row.kind == editing::model::TrackRowKind::Sequence) {
             label = "O  Camera Sequence";
             if (clicked) {
                 editor.selection().select(editing::model::SelectedSequence{});
                 editor.submitAction({EditorActionType::ClearPreviewCamera});
             }
-        } else if (row.kind == editing::model::TrackRowKind::WorldActor) {
-            label = "O  World Actor";
-            if (clicked) editor.selection().select(editing::model::SelectedWorldActor{});
         }
         drawList->AddText({fullMin.x + 12.0f, textY}, IM_COL32(210, 210, 210, 255), label.c_str());
         if (row.locked) drawList->AddText({fullMin.x + listWidth - 48.0f, textY}, IM_COL32(140, 140, 140, 255), "LOCK");
@@ -306,29 +296,6 @@ void TimelinePanel::draw() {
                     editor.selection().select(editing::model::SelectedSequenceSegment{segment.id});
                     if (!segment.locked && (std::abs(ImGui::GetMousePos().x - minimum.x) < 8.0f || std::abs(ImGui::GetMousePos().x - maximum.x) < 8.0f)) {
                         mDraggingSegmentId = segment.id;
-                        mDraggingWorldActor = false;
-                        mDraggingStart = std::abs(ImGui::GetMousePos().x - minimum.x) < std::abs(ImGui::GetMousePos().x - maximum.x);
-                        mDragStartTick = segment.startTick;
-                        mDragEndTick = segment.endTick;
-                    }
-                }
-            }
-        } else if (row.kind == editing::model::TrackRowKind::WorldActor) {
-            for (auto const& segment : project->worldActor.segments) {
-                ImVec2 minimum{canvasLeft + segment.startTick * mPixelsPerTick - mScrollX, y + 4.0f};
-                ImVec2 maximum{canvasLeft + segment.endTick * mPixelsPerTick - mScrollX, rowBottom - 4.0f};
-                bool selected = editor.selection().getAs<editing::model::SelectedWorldActorSegment>() && editor.selection().getAs<editing::model::SelectedWorldActorSegment>()->segmentId == segment.id;
-                drawList->AddRectFilled(minimum, maximum, kWorldActorColor);
-                drawList->AddRect(minimum, maximum, selected ? IM_COL32(190, 215, 197, 255) : IM_COL32(109, 137, 120, 255));
-                char label[32]{};
-                std::snprintf(label, sizeof(label), "%.2fx", segment.speed);
-                drawList->AddText({minimum.x + 5.0f, minimum.y + 6.0f}, IM_COL32(245, 245, 247, 255), label);
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && contains(minimum, maximum, ImGui::GetMousePos())) {
-                    clickConsumed = true;
-                    editor.selection().select(editing::model::SelectedWorldActorSegment{segment.id});
-                    if (!segment.locked && (std::abs(ImGui::GetMousePos().x - minimum.x) < 8.0f || std::abs(ImGui::GetMousePos().x - maximum.x) < 8.0f)) {
-                        mDraggingSegmentId = segment.id;
-                        mDraggingWorldActor = true;
                         mDraggingStart = std::abs(ImGui::GetMousePos().x - minimum.x) < std::abs(ImGui::GetMousePos().x - maximum.x);
                         mDragStartTick = segment.startTick;
                         mDragEndTick = segment.endTick;
@@ -355,16 +322,6 @@ void TimelinePanel::draw() {
                     previewAction.id = camera.id;
                     editor.submitAction(std::move(previewAction));
                     submitSeek(key.tick);
-                }
-            }
-        } else if (row.kind == editing::model::TrackRowKind::Marker) {
-            for (auto const& marker : project->markers) {
-                float x = canvasLeft + marker.tick * mPixelsPerTick - mScrollX;
-                drawList->AddLine({x, y}, {x, rowBottom}, IM_COL32(240, 192, 32, 255));
-                drawList->AddText({x + 4.0f, y + 2.0f}, IM_COL32(240, 210, 100, 255), marker.label.c_str());
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && std::abs(ImGui::GetMousePos().x - x) <= 6.0f && ImGui::GetMousePos().y >= y && ImGui::GetMousePos().y <= rowBottom) {
-                    clickConsumed = true;
-                    editor.selection().select(editing::model::SelectedMarker{marker.id});
                 }
             }
         }
@@ -397,7 +354,7 @@ void TimelinePanel::draw() {
             float x = canvasLeft + tick * mPixelsPerTick - mScrollX;
             drawList->AddLine({x, bodyTop}, {x, bodyBottom}, IM_COL32(240, 192, 32, 180), 2.0f);
         } else {
-            EditorAction action{mDraggingWorldActor ? EditorActionType::TrimWorldActor : EditorActionType::TrimSequence};
+            EditorAction action{EditorActionType::TrimSequence};
             action.id = mDraggingSegmentId;
             action.tick = mDraggingStart ? tick : mDragStartTick;
             action.kind = mDraggingStart ? mDragEndTick : tick;
