@@ -143,6 +143,8 @@ void testCameraMotion() {
     state.cameras.front().keys.front().easingType = editor::EasingType::EaseInOut;
     auto sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 50);
     require(sample.valid && sample.position.x == 6.0f && sample.fov == 79.0f, "keyframe sampler must apply timeline interpolation");
+    sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 25.0);
+    require(sample.valid && sample.position.x == 1.5f, "keyframe sampler must preserve fractional timeline ticks");
     stack.push(std::make_unique<video_editing::ApplyCameraTransitionPreset>(cameraId, state.cameras.front().keys.front().id, editor::CameraTransitionPreset::ArcPushIn), state);
     require(state.cameras.front().keys.front().outgoingMotion.pathType == editor::CameraPathType::CubicBezier, "arc preset must configure cubic path");
     sample = playback::editor::camera_motion::CameraSampler::sampleAt(state.cameras.front(), 0);

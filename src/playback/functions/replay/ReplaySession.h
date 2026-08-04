@@ -24,6 +24,7 @@ class Dimension;
 class LevelChunk;
 class LegacyClientNetworkHandler;
 class MinecraftScreenModel;
+class Actor;
 class Player;
 enum class MinecraftPacketIds : int;
 
@@ -31,12 +32,20 @@ namespace playback::functions {
 
 struct EditorCameraOverrideState {
     bool  active{};
+    bool  snap{};
     float x{};
     float y{};
     float z{};
     float yaw{};
     float pitch{};
     float fov{90.0f};
+};
+
+struct EditorCameraAbilityBackup {
+    bool captured{};
+    bool noClip{};
+    bool mayFly{};
+    bool flying{};
 };
 
 class ReplaySession {
@@ -173,6 +182,12 @@ private:
     LegacyClientNetworkHandler*         mNetworkHandler = nullptr;
     mutable std::mutex                   mEditorCameraOverrideMutex;
     EditorCameraOverrideState            mEditorCameraOverride;
+    EditorCameraAbilityBackup            mEditorCameraAbilityBackup;
+    bool                                 mEditorCameraMoveToOffsetCaptured{};
+    float                                mEditorCameraMoveToOffsetX{};
+    float                                mEditorCameraMoveToOffsetY{};
+    float                                mEditorCameraMoveToOffsetZ{};
+    size_t                               mDroppedHostMovePackets{};
 
 public:
     bool mIsProcessingSnapshot = false;
@@ -230,6 +245,8 @@ private:
 
     [[nodiscard]] bool refreshReplayPlayer();
 
+    [[nodiscard]] bool isReplayHostActor(Actor const& actor) const;
+
     [[nodiscard]] bool clearReplayObjectives();
 
     void clearReplayData();
@@ -270,17 +287,24 @@ public:
 
     [[nodiscard]] float getPlaybackSpeed() const { return mPlaybackSpeed; }
 
+    [[nodiscard]] double getCameraTime() const {
+        return static_cast<double>(getCurrentTick()) + std::clamp(static_cast<double>(mPlaybackTickAccumulator), 0.0, 1.0);
+    }
+
     void adjustPlaybackSpeed(int direction);
 
     [[nodiscard]] bool setPaused(bool paused);
 
-    bool setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov);
+    bool setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov, bool snap = false);
     void clearEditorCameraOverride();
     [[nodiscard]] EditorCameraOverrideState snapshotEditorCameraOverride() const;
+    void applyEditorCameraOverride();
 
     [[nodiscard]] bool isInjectingPacket(Packet const* packet) const {
         return packet && mInjectingPacket.load(std::memory_order_acquire) == packet;
     }
+
+    [[nodiscard]] bool shouldRejectReplayHostMove(ActorRuntimeID runtimeId) const;
 
     [[nodiscard]] bool isIsolatingReplayWorld() const { return mActive; }
 
@@ -329,6 +353,8 @@ public:
     void handleMoveEntities(PlaybackBuffer& data);
 
 private:
+    void restoreEditorCameraAbilities();
+
     ReplaySession() = default;
     ~ReplaySession();
 

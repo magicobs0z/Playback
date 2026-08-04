@@ -53,6 +53,7 @@ LL_TYPE_INSTANCE_HOOK(
                   && !isShowingProgressScreen();
     }
     editor::tickReplayUI(hudVisible);
+    replay.applyEditorCameraOverride();
     replay.tryFinalizeWorldCleanup();
     return result;
 }

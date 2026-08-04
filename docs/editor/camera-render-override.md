@@ -1,7 +1,9 @@
-# editor/camera-render-override — 摄像机渲染帧覆盖
+# editor/camera-render-override — 摄像机渲染帧覆盖（已废弃）
 
 > 入口：`src/playback/editor/camera-render/`
-> 角色：将编辑器已采样的摄像机位置与旋转在渲染帧开始前覆盖到 MCBE 的真实渲染 CameraComponent；不移动回放玩家，不派发 CameraInstruction。
+> 状态：已废弃，不再作为 Camera 轨道预览实现。
+> 替代设计：[camera-spectator-control.md](file:///d:/raplay/Playback/docs/editor/camera-spectator-control.md)。
+> 原因：`CameraComponent` 与 `mce::Camera` 在当前 MCBE 版本不是可稳定控制最终画面的入口；最终实现改由本地无碰撞旁观者承载镜头。
 
 ## 一、需求
 

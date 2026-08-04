@@ -232,6 +232,7 @@ bool ReplaySession::start(std::filesystem::path filePath) {
 }
 
 void ReplaySession::clearReplayData() {
+    restoreEditorCameraAbilities();
     mStopRequested.store(false, std::memory_order_release);
     mRequestedSeekTick.store(-1, std::memory_order_release);
     mActive       = false;
@@ -277,6 +278,7 @@ void ReplaySession::clearReplayData() {
     mDirectSubChunkEntries   = 0;
     mReplayPlayer            = nullptr;
     mNetworkHandler          = nullptr;
+    mDroppedHostMovePackets  = 0;
     mReplayFilePath.clear();
     mMeta = PlaybackMeta{};
     mReaders.clear();
@@ -360,14 +362,15 @@ bool ReplaySession::setPaused(bool paused) {
     if (mIsPaused == paused) return true;
 
     mIsPaused = paused;
+    if (paused) clearEditorCameraOverride();
     getLogger().debug("Replay {} at tick {}", paused ? "paused" : "playing", mCurrentTick);
     return true;
 }
 
-bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov) {
+bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov, bool snap) {
     if (!mActive || !mReplayWorldJoined) return false;
     std::scoped_lock lock(mEditorCameraOverrideMutex);
-    mEditorCameraOverride = {true, x, y, z, yaw, pitch, fov};
+    mEditorCameraOverride = {true, snap || !mEditorCameraOverride.active, x, y, z, yaw, pitch, fov};
     return true;
 }
 
@@ -379,6 +382,75 @@ void ReplaySession::clearEditorCameraOverride() {
 EditorCameraOverrideState ReplaySession::snapshotEditorCameraOverride() const {
     std::scoped_lock lock(mEditorCameraOverrideMutex);
     return mEditorCameraOverride;
+}
+
+bool ReplaySession::shouldRejectReplayHostMove(ActorRuntimeID runtimeId) const {
+    if (!mActive || !mReplayWorldJoined || mPendingReplayDimension || !mReplayPlayer) return false;
+    std::scoped_lock lock(mEditorCameraOverrideMutex);
+    return mEditorCameraOverride.active && runtimeId == mReplayPlayer->getRuntimeID();
+}
+
+void ReplaySession::applyEditorCameraOverride() {
+    if (!mActive || mIsPaused || !mReplayWorldJoined || !mReplayPlayer) return;
+
+    auto state = snapshotEditorCameraOverride();
+    if (!state.active) return;
+
+    if (!mEditorCameraAbilityBackup.captured) {
+        auto const& abilities = mReplayPlayer->getAbilities();
+        mEditorCameraAbilityBackup = {
+            true,
+            abilities.getBool(AbilitiesIndex::NoClip),
+            abilities.getBool(AbilitiesIndex::MayFly),
+            abilities.getBool(AbilitiesIndex::Flying)
+        };
+        mReplayPlayer->setAbility(AbilitiesIndex::NoClip, true);
+        mReplayPlayer->setAbility(AbilitiesIndex::MayFly, true);
+        mReplayPlayer->setAbility(AbilitiesIndex::Flying, true);
+    }
+    auto const rotation = Vec2{state.pitch, state.yaw};
+    auto const targetPosition = Vec3{state.x, state.y, state.z};
+    auto const moveToPosition = Vec3{
+        targetPosition.x - mEditorCameraMoveToOffsetX,
+        targetPosition.y - mEditorCameraMoveToOffsetY,
+        targetPosition.z - mEditorCameraMoveToOffsetZ
+    };
+    mReplayPlayer->moveTo(moveToPosition, rotation);
+    if (!mEditorCameraMoveToOffsetCaptured) {
+        auto const firstPosition = mReplayPlayer->getPosition();
+        mEditorCameraMoveToOffsetX = firstPosition.x - moveToPosition.x;
+        mEditorCameraMoveToOffsetY = firstPosition.y - moveToPosition.y;
+        mEditorCameraMoveToOffsetZ = firstPosition.z - moveToPosition.z;
+        mEditorCameraMoveToOffsetCaptured = true;
+        mReplayPlayer->moveTo(
+            Vec3{
+                targetPosition.x - mEditorCameraMoveToOffsetX,
+                targetPosition.y - mEditorCameraMoveToOffsetY,
+                targetPosition.z - mEditorCameraMoveToOffsetZ
+            },
+            rotation
+        );
+    }
+    if (state.snap) {
+        static_cast<LocalPlayer*>(mReplayPlayer)->_forceCameraCut();
+        std::scoped_lock lock(mEditorCameraOverrideMutex);
+        mEditorCameraOverride.snap = false;
+    }
+}
+
+void ReplaySession::restoreEditorCameraAbilities() {
+    if (!mEditorCameraAbilityBackup.captured) return;
+
+    if (mReplayPlayer) {
+        mReplayPlayer->setAbility(AbilitiesIndex::NoClip, mEditorCameraAbilityBackup.noClip);
+        mReplayPlayer->setAbility(AbilitiesIndex::MayFly, mEditorCameraAbilityBackup.mayFly);
+        mReplayPlayer->setAbility(AbilitiesIndex::Flying, mEditorCameraAbilityBackup.flying);
+    }
+    mEditorCameraAbilityBackup = {};
+    mEditorCameraMoveToOffsetCaptured = false;
+    mEditorCameraMoveToOffsetX = 0.0f;
+    mEditorCameraMoveToOffsetY = 0.0f;
+    mEditorCameraMoveToOffsetZ = 0.0f;
 }
 
 int ReplaySession::getTotalTicks() const { return std::max(0, mMeta.totalTicks); }
@@ -1133,6 +1205,10 @@ bool ReplaySession::refreshReplayPlayer() {
         mReplayDimension.store(&player->getDimension(), std::memory_order_release);
     }
     return true;
+}
+
+bool ReplaySession::isReplayHostActor(Actor const& actor) const {
+    return mReplayPlayer && &actor == mReplayPlayer;
 }
 
 bool ReplaySession::prepareChunkInjectionPlan(PlaybackView const& view) {
@@ -1956,6 +2032,13 @@ void ReplaySession::handleMoveEntities(PlaybackBuffer& data) {
             if (!mRecordedEntityIds.contains(id) || !mReplayPlayer) continue;
             auto* actor = mReplayPlayer->getLevel().fetchEntity(id, false);
             if (!actor) continue;
+            if (isReplayHostActor(*actor)) {
+                ++mDroppedHostMovePackets;
+                if (mDroppedHostMovePackets == 1) {
+                    getLogger().warn("Rejected replay movement for the local replay host");
+                }
+                continue;
+            }
 
             auto const previousRotation = actor->getRotation();
             auto&      entityContext    = actor->getEntityContext();
@@ -2054,6 +2137,13 @@ void ReplaySession::handleMoveEntities(PlaybackBuffer& data) {
             if (!mRecordedEntityIds.contains(id) || !mReplayPlayer) continue;
             auto* actor = mReplayPlayer->getLevel().fetchEntity(id, false);
             if (!actor || !actor->isPlayer()) continue;
+            if (isReplayHostActor(*actor)) {
+                ++mDroppedHostMovePackets;
+                if (mDroppedHostMovePackets == 1) {
+                    getLogger().warn("Rejected legacy replay movement for the local replay host");
+                }
+                continue;
+            }
 
             packet = MinecraftPackets::createPacket(MinecraftPacketIds::MovePlayer);
             if (!packet) {
@@ -2077,6 +2167,13 @@ void ReplaySession::handleMoveEntities(PlaybackBuffer& data) {
             if (!mRecordedEntityIds.contains(id) || !mReplayPlayer) continue;
             auto* actor = mReplayPlayer->getLevel().fetchEntity(id, false);
             if (!actor || actor->isPlayer()) continue;
+            if (isReplayHostActor(*actor)) {
+                ++mDroppedHostMovePackets;
+                if (mDroppedHostMovePackets == 1) {
+                    getLogger().warn("Rejected legacy replay actor movement for the local replay host");
+                }
+                continue;
+            }
 
             packet = MinecraftPackets::createPacket(MinecraftPacketIds::MoveAbsoluteActor);
             if (!packet) {
@@ -2227,7 +2324,9 @@ bool ReplaySession::applyGamePacket(MinecraftPacketIds packetId, std::string_vie
         mRecordedEntityIds.emplace(*static_cast<AddPaintingPacket const&>(*packet).mEntityId);
         break;
     case MinecraftPacketIds::AddPlayer:
-        mRecordedEntityIds.emplace(*static_cast<AddPlayerPacket const&>(*packet).mEntityId);
+        if (!mReplayPlayer || *static_cast<AddPlayerPacket const&>(*packet).mEntityId != mReplayPlayer->getOrCreateUniqueID()) {
+            mRecordedEntityIds.emplace(*static_cast<AddPlayerPacket const&>(*packet).mEntityId);
+        }
         break;
     case MinecraftPacketIds::RemoveActor:
         mRecordedEntityIds.erase(*static_cast<RemoveActorPacket const&>(*packet).mEntityId);
@@ -2316,6 +2415,10 @@ bool ReplaySession::clearRecordedEntities() {
     auto ids = std::move(mRecordedEntityIds);
     mRecordedEntityIds.clear();
     for (auto const& id : ids) {
+        if (mReplayPlayer && mReplayPlayer->getLevel().fetchEntity(id, false) == mReplayPlayer) {
+            getLogger().warn("Skipped removal of the local replay host from recorded entities");
+            continue;
+        }
         auto packet = MinecraftPackets::createPacket(MinecraftPacketIds::RemoveActor);
         if (!packet || !packet->mHandler) return false;
         static_cast<RemoveActorPacket&>(*packet).mEntityId = id;

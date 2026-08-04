@@ -48,6 +48,7 @@ void EditorController::reset() {
     mCommandStack.clear();
     mProjectTotalTicks = -1;
     mPreviewCameraId.clear();
+    mAppliedPreviewCameraId.clear();
 }
 
 void EditorController::ensureProject(int totalTicks) {
@@ -157,6 +158,7 @@ void EditorController::applyPreviewCamera() {
     if (!session.isActive() || !session.hasJoinedReplayWorld()) return;
     if (session.isPaused()) {
         session.clearEditorCameraOverride();
+        mAppliedPreviewCameraId.clear();
         return;
     }
     auto const* camera = editing::CameraBindingOps::resolveCamera(mProject, mPreviewCameraId);
@@ -166,14 +168,18 @@ void EditorController::applyPreviewCamera() {
     }
     if (!camera) {
         session.clearEditorCameraOverride();
+        mAppliedPreviewCameraId.clear();
         return;
     }
-    auto const sample = camera_motion::CameraSampler::sampleAt(*camera, mProject.currentTick);
+    auto const sample = camera_motion::CameraSampler::sampleAt(*camera, session.getCameraTime());
     if (!sample.valid) {
         session.clearEditorCameraOverride();
+        mAppliedPreviewCameraId.clear();
         return;
     }
-    session.setEditorCameraOverride(sample.position.x, sample.position.y, sample.position.z, sample.rotation.x, sample.rotation.y, sample.fov);
+    bool const snap = mAppliedPreviewCameraId != camera->id;
+    session.setEditorCameraOverride(sample.position.x, sample.position.y, sample.position.z, sample.rotation.x, sample.rotation.y, sample.fov, snap);
+    mAppliedPreviewCameraId = camera->id;
 }
 
 void EditorController::applyPreviewCameraAfterReplayTick() {

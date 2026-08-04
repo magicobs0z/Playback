@@ -53,16 +53,16 @@ Vec3 autoControl(const std::vector<CameraKeyframe>& keys, size_t index, bool out
     return outgoing ? tangent : scale(tangent, -1.0f);
 }
 }
-CameraSample CameraSampler::sampleAt(const editing::model::CameraEntity& camera, int tick) {
+CameraSample CameraSampler::sampleAt(const editing::model::CameraEntity& camera, double tick) {
     CameraSample sample; sample.source = camera.name;
     if (camera.kind == editing::model::CameraKind::Keyframe) {
         if (camera.keys.empty()) { sample.valid = false; return sample; }
         const auto& keys = camera.keys;
-        const auto upper = std::upper_bound(keys.begin(), keys.end(), tick, [](int value, const auto& key) { return value < key.tick; });
+        const auto upper = std::upper_bound(keys.begin(), keys.end(), tick, [](double value, const auto& key) { return value < static_cast<double>(key.tick); });
         const auto& a = upper == keys.begin() ? keys.front() : *(upper - 1);
         const auto& b = upper == keys.end() ? keys.back() : *upper;
         if (&a == &b) { sample.position = a.position; sample.rotation = {a.yaw, a.pitch}; sample.fov = a.fov; return sample; }
-        const float ratio = std::clamp(static_cast<float>(tick - a.tick) / static_cast<float>(b.tick - a.tick), 0.0f, 1.0f);
+        const float ratio = std::clamp(static_cast<float>((tick - static_cast<double>(a.tick)) / static_cast<double>(b.tick - a.tick)), 0.0f, 1.0f);
         const float eased = ease(a, ratio);
         if (a.outgoingMotion.pathType == CameraPathType::CubicBezier) sample.position = cubicBezier(a.position, add(a.position, a.outgoingMotion.outControl), add(b.position, b.outgoingMotion.inControl), b.position, eased);
         else if (a.outgoingMotion.pathType == CameraPathType::AutoSmooth && keys.size() > 2) {
@@ -73,7 +73,7 @@ CameraSample CameraSampler::sampleAt(const editing::model::CameraEntity& camera,
         sample.rotation = {shortestAngle(a.yaw, b.yaw, eased), interpolate(a.pitch, b.pitch, eased)};
         sample.fov = interpolate(a.fov, b.fov, eased) + std::sin(kPi * eased) * a.outgoingMotion.fovPeakOffset;
     }
-    else if (camera.kind == editing::model::CameraKind::Path && camera.path) { sample.rotation = camera.path->defaultRotation; sample.fov = camera.path->defaultFov; if (!camera.path->points.empty()) { auto point = std::find_if(camera.path->points.rbegin(), camera.path->points.rend(), [tick](const auto& value) { return value.tick <= tick; }); sample.position = point == camera.path->points.rend() ? camera.path->points.front().position : point->position; } }
+    else if (camera.kind == editing::model::CameraKind::Path && camera.path) { sample.rotation = camera.path->defaultRotation; sample.fov = camera.path->defaultFov; if (!camera.path->points.empty()) { auto point = std::find_if(camera.path->points.rbegin(), camera.path->points.rend(), [tick](const auto& value) { return static_cast<double>(value.tick) <= tick; }); sample.position = point == camera.path->points.rend() ? camera.path->points.front().position : point->position; } }
     else if (camera.kind == editing::model::CameraKind::Rig && camera.rig) { sample.position = camera.rig->basePosition; sample.rotation = camera.rig->baseRotation; sample.fov = camera.rig->baseFov; }
     else if (camera.kind == editing::model::CameraKind::Preset && camera.preset) { sample.position = camera.preset->offset; sample.rotation = camera.preset->rotation; sample.fov = camera.preset->fov; }
     return sample;

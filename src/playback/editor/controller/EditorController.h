@@ -43,6 +43,7 @@ private:
     editing::command::CommandStack               mCommandStack;
     int                                          mProjectTotalTicks{-1};
     std::string                                  mPreviewCameraId;
+    std::string                                  mAppliedPreviewCameraId;
 };
 
 } // namespace playback::editor

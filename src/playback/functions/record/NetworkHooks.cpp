@@ -19,6 +19,7 @@
 #include "mc/network/packet/AddItemActorPacket.h"
 #include "mc/network/packet/LevelChunkPacket.h"
 #include "mc/network/packet/LevelEventPacket.h"
+#include "mc/network/packet/MovePlayerPacket.h"
 #include "mc/network/packet/RemoveActorPacket.h"
 #include "mc/network/packet/SetTimePacket.h"
 #include "mc/network/packet/SubChunkPacket.h"
@@ -52,15 +53,16 @@ struct NetworkHookState {
     bool updateBlock{};
     bool updateBlockSynced{};
     bool updateSubChunkBlocks{};
+    bool replayHostMovePlayer{};
 
     [[nodiscard]] bool fastPathHandlersInstalled() const {
         return removeActor && takeItemActor && actorEvent && levelEvent && updateBlock && updateBlockSynced
-            && updateSubChunkBlocks;
+            && updateSubChunkBlocks && replayHostMovePlayer;
     }
 
     [[nodiscard]] bool fastPathHandlersRemoved() const {
         return !removeActor && !takeItemActor && !actorEvent && !levelEvent && !updateBlock && !updateBlockSynced
-            && !updateSubChunkBlocks;
+            && !updateSubChunkBlocks && !replayHostMovePlayer;
     }
 };
 
@@ -107,6 +109,20 @@ LL_TYPE_INSTANCE_HOOK(
         }
     }
     origin(target, packet, size);
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    PlaybackReplayHostMovePlayerHook,
+    ll::memory::HookPriority::High,
+    LegacyClientNetworkHandler,
+    &LegacyClientNetworkHandler::$handle,
+    void,
+    NetworkIdentifier const& source,
+    MovePlayerPacket const&  packet
+) {
+    auto& replaySession = functions::ReplaySession::getInstance();
+    if (replaySession.isInjectingPacket(&packet) && replaySession.shouldRejectReplayHostMove(*packet.mPlayerID)) return;
+    origin(source, packet);
 }
 
 LL_TYPE_INSTANCE_HOOK(
@@ -355,9 +371,11 @@ bool hookNetwork(bool enable) {
             && installNetworkHook<PlaybackLevelEventHook>(state.levelEvent)
             && installNetworkHook<PlaybackUpdateBlockHook>(state.updateBlock)
             && installNetworkHook<PlaybackUpdateBlockSyncedHook>(state.updateBlockSynced)
-            && installNetworkHook<PlaybackUpdateSubChunkBlocksHook>(state.updateSubChunkBlocks);
+            && installNetworkHook<PlaybackUpdateSubChunkBlocksHook>(state.updateSubChunkBlocks)
+            && installNetworkHook<PlaybackReplayHostMovePlayerHook>(state.replayHostMovePlayer);
     };
     auto removeAll = [&] {
+        removeNetworkHook<PlaybackReplayHostMovePlayerHook>(state.replayHostMovePlayer);
         removeNetworkHook<PlaybackUpdateSubChunkBlocksHook>(state.updateSubChunkBlocks);
         removeNetworkHook<PlaybackUpdateBlockSyncedHook>(state.updateBlockSynced);
         removeNetworkHook<PlaybackUpdateBlockHook>(state.updateBlock);
