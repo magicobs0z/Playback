@@ -255,7 +255,6 @@ public:
     [[nodiscard]] int getTotalTicks() const;
 
     [[nodiscard]] Player const* getReplayPlayer() const { return mReplayPlayer; }
-    void reportEditorCameraDebug(Player const& player) const;
 
     [[nodiscard]] float getPlaybackSpeed() const { return mPlaybackSpeed; }
 

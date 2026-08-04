@@ -14,7 +14,6 @@
 #include "mc/client/player/LocalPlayer.h"
 #include "mc/deps/core/utility/ReadOnlyBinaryStream.h"
 #include "mc/deps/ecs/gamerefs_entity/EntityContext.h"
-#include "mc/deps/minecraft_camera/components/CameraInstructionComponent.h"
 #include "mc/deps/vanilla_components/OnGroundFlagComponent.h"
 #include "mc/entity/components/ActorHeadRotationComponent.h"
 #include "mc/entity/components/LocalPlayerDimensionWaitComponent.h"
@@ -63,9 +62,6 @@
 #include "uuid.h"
 #include "zip.h"
 
-#include <windows.h>
-#include <wininet.h>
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -84,47 +80,6 @@
 namespace playback::functions {
 
 namespace {
-
-void reportCameraPreviewDebug(char const* phase, int tick, float x, float y, float z, float yaw, float pitch) {
-    static auto lastReport = std::chrono::steady_clock::time_point{};
-    auto const now = std::chrono::steady_clock::now();
-    if (now - lastReport < std::chrono::milliseconds(500)) return;
-    lastReport = now;
-    auto const session = std::string{"camera-preview-jitter"};
-    auto const body = std::string{"{\"sessionId\":\""} + session + "\",\"runId\":\"pre-fix\",\"hypothesisId\":\"A\",\"location\":\"ReplaySession\",\"msg\":\"[DEBUG] camera-preview " + phase + "\",\"data\":{\"tick\":" + std::to_string(tick) + ",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + ",\"z\":" + std::to_string(z) + ",\"yaw\":" + std::to_string(yaw) + ",\"pitch\":" + std::to_string(pitch) + "}}";
-    auto internet = InternetOpenA("PlaybackDebug", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
-    if (!internet) return;
-    auto connection = InternetConnectA(internet, "127.0.0.1", 7777, nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
-    if (connection) {
-        auto request = HttpOpenRequestA(connection, "POST", "/event", nullptr, nullptr, nullptr, INTERNET_FLAG_RELOAD, 0);
-        if (request) {
-            char const* headers = "Content-Type: application/json\r\n";
-            HttpSendRequestA(request, headers, -1, const_cast<char*>(body.data()), static_cast<DWORD>(body.size()));
-            InternetCloseHandle(request);
-        }
-        InternetCloseHandle(connection);
-    }
-    InternetCloseHandle(internet);
-}
-
-void reportCameraPreviewDebugForce(char const* phase, int tick, Actor const& player) {
-    auto const& position = player.getPosition();
-    auto const& rotation = player.getRotation();
-    auto const body = std::string{"{\"sessionId\":\"camera-preview-jitter\",\"runId\":\"pre-fix\",\"hypothesisId\":\"B\",\"location\":\"ReplaySession\",\"msg\":\"[DEBUG] camera-preview "} + phase + "\",\"data\":{\"tick\":" + std::to_string(tick) + ",\"x\":" + std::to_string(position.x) + ",\"y\":" + std::to_string(position.y) + ",\"z\":" + std::to_string(position.z) + ",\"yaw\":" + std::to_string(rotation.y) + ",\"pitch\":" + std::to_string(rotation.x) + "}}";
-    auto internet = InternetOpenA("PlaybackDebug", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
-    if (!internet) return;
-    auto connection = InternetConnectA(internet, "127.0.0.1", 7777, nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
-    if (connection) {
-        auto request = HttpOpenRequestA(connection, "POST", "/event", nullptr, nullptr, nullptr, INTERNET_FLAG_RELOAD, 0);
-        if (request) {
-            char const* headers = "Content-Type: application/json\r\n";
-            HttpSendRequestA(request, headers, -1, const_cast<char*>(body.data()), static_cast<DWORD>(body.size()));
-            InternetCloseHandle(request);
-        }
-        InternetCloseHandle(connection);
-    }
-    InternetCloseHandle(internet);
-}
 
 }
 
@@ -410,40 +365,16 @@ bool ReplaySession::setPaused(bool paused) {
 }
 
 bool ReplaySession::setEditorCameraOverride(float x, float y, float z, float yaw, float pitch, float fov) {
-    if (!mActive || !mReplayWorldJoined) return false;
-    // #region debug-point A:before-camera-override
-    reportCameraPreviewDebug("before-override", mCurrentTick, x, y, z, yaw, pitch);
-    // #endregion
-    auto client = ll::service::getClientInstance();
-    if (!client) return false;
-    auto* cameraActor = client->getCameraActor();
-    if (!cameraActor) return false;
-    auto& instruction = cameraActor->getEntityContext().getOrAddComponent<MinecraftCamera::CameraInstructionComponent>();
-    instruction.mPos = Vec3{x, y, z};
-    instruction.mRot = Vec2{pitch, yaw};
-    // #region debug-point A:after-camera-override
-    reportCameraPreviewDebugForce("after-override", mCurrentTick, *cameraActor);
-    // #endregion
+    (void)x;
+    (void)y;
+    (void)z;
+    (void)yaw;
+    (void)pitch;
     (void)fov;
-    return true;
+    return false;
 }
 
-void ReplaySession::reportEditorCameraDebug(Player const& player) const {
-    // #region debug-point B:sub-tick-final-camera-state
-    reportCameraPreviewDebugForce("sub-tick-final", mCurrentTick, player);
-    // #endregion
-}
-
-void ReplaySession::clearEditorCameraOverride() {
-    auto client = ll::service::getClientInstance();
-    if (!client) return;
-    auto* cameraActor = client->getCameraActor();
-    if (!cameraActor) return;
-    auto instruction = cameraActor->getEntityContext().tryGetComponent<MinecraftCamera::CameraInstructionComponent>();
-    if (!instruction) return;
-    instruction->mPos = std::nullopt;
-    instruction->mRot = std::nullopt;
-}
+void ReplaySession::clearEditorCameraOverride() {}
 
 int ReplaySession::getTotalTicks() const { return std::max(0, mMeta.totalTicks); }
 

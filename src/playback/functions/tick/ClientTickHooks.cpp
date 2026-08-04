@@ -11,7 +11,6 @@
 #include "mc/client/game/ClientInstance.h"
 #include "mc/client/gui/SceneType.h"
 #include "mc/client/multiplayer/MultiPlayerLevel.h"
-#include "mc/world/actor/player/Player.h"
 
 namespace playback::functions {
 
@@ -70,9 +69,6 @@ LL_TYPE_INSTANCE_HOOK(
     [[maybe_unused]] auto tickBoundary = ChunkMutationBarrier::enterTickBoundary(*this);
     tickPlayback();
     editor::applyReplayCameraPreview();
-    if (auto const* player = ReplaySession::getInstance().getReplayPlayer()) {
-        ReplaySession::getInstance().reportEditorCameraDebug(*player);
-    }
 }
 
 bool hookClientTick(bool enable) {
