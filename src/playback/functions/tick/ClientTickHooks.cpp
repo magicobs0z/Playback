@@ -11,6 +11,8 @@
 #include "mc/client/game/ClientInstance.h"
 #include "mc/client/gui/SceneType.h"
 #include "mc/client/multiplayer/MultiPlayerLevel.h"
+#include "mc/client/player/LocalPlayer.h"
+#include "mc/client/renderer/FrameUpdateContextBase.h"
 
 namespace playback::functions {
 
@@ -53,9 +55,67 @@ LL_TYPE_INSTANCE_HOOK(
                   && !isShowingProgressScreen();
     }
     editor::tickReplayUI(hudVisible);
-    replay.applyEditorCameraOverride();
     replay.tryFinalizeWorldCleanup();
     return result;
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    PlaybackLocalPlayerFrameUpdateHook,
+    ll::memory::HookPriority::Low,
+    LocalPlayer,
+    &LocalPlayer::$frameUpdate,
+    void,
+    FrameUpdateContextBase& context
+) {
+    // #region debug-point B:frame-update
+    ReplaySession::getInstance().debugReportCameraState("LocalPlayer::frameUpdate:before", *this);
+    // #endregion
+    origin(context);
+    auto& replay = ReplaySession::getInstance();
+    if (replay.isEditorCameraControlling(*this)) replay.applyEditorCameraOverride();
+    // #region debug-point B:frame-update
+    replay.debugReportCameraState("LocalPlayer::frameUpdate:after", *this);
+    // #endregion
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    PlaybackLocalPlayerNormalTickHook,
+    ll::memory::HookPriority::High,
+    LocalPlayer,
+    &LocalPlayer::$normalTick,
+    void
+) {
+    // #region debug-point B:normal-tick
+    ReplaySession::getInstance().debugReportCameraState("LocalPlayer::normalTick:before", *this);
+    // #endregion
+    origin();
+    // #region debug-point B:normal-tick
+    ReplaySession::getInstance().debugReportCameraState("LocalPlayer::normalTick:after", *this);
+    // #endregion
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    PlaybackLocalPlayerTurnHook,
+    ll::memory::HookPriority::High,
+    LocalPlayer,
+    &LocalPlayer::localPlayerTurn,
+    void,
+    Vec2 const& deltaRot
+) {
+    if (ReplaySession::getInstance().isEditorCameraControlling(*this)) return;
+    origin(deltaRot);
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    PlaybackLocalPlayerApplyTurnDeltaHook,
+    ll::memory::HookPriority::High,
+    LocalPlayer,
+    &LocalPlayer::_applyTurnDelta,
+    void,
+    Vec2 const& turnOffset
+) {
+    if (ReplaySession::getInstance().isEditorCameraControlling(*this)) return;
+    origin(turnOffset);
 }
 
 LL_TYPE_INSTANCE_HOOK(
@@ -76,18 +136,46 @@ bool hookClientTick(bool enable) {
     struct HookState {
         bool update{};
         bool levelTick{};
+        bool localPlayerFrameUpdate{};
+        bool localPlayerNormalTick{};
+        bool localPlayerTurn{};
+        bool localPlayerApplyTurnDelta{};
     };
     static HookState state;
 
-    auto allInstalled  = [&] { return state.update && state.levelTick; };
-    auto noneInstalled = [&] { return !state.update && !state.levelTick; };
+    auto allInstalled  = [&] {
+        return state.update && state.levelTick && state.localPlayerFrameUpdate && state.localPlayerNormalTick && state.localPlayerTurn
+            && state.localPlayerApplyTurnDelta;
+    };
+    auto noneInstalled = [&] {
+        return !state.update && !state.levelTick && !state.localPlayerFrameUpdate && !state.localPlayerNormalTick && !state.localPlayerTurn
+            && !state.localPlayerApplyTurnDelta;
+    };
     auto installAll    = [&] {
         if (!state.update) state.update = PlaybackClientUpdateHook::hook() == 0;
         if (!state.update) return false;
         if (!state.levelTick) state.levelTick = PlaybackClientLevelTickHook::hook() == 0;
-        return state.levelTick;
+        if (!state.levelTick) return false;
+        if (!state.localPlayerFrameUpdate) state.localPlayerFrameUpdate = PlaybackLocalPlayerFrameUpdateHook::hook() == 0;
+        if (!state.localPlayerFrameUpdate) return false;
+        if (!state.localPlayerNormalTick) state.localPlayerNormalTick = PlaybackLocalPlayerNormalTickHook::hook() == 0;
+        if (!state.localPlayerNormalTick) return false;
+        if (!state.localPlayerTurn) state.localPlayerTurn = PlaybackLocalPlayerTurnHook::hook() == 0;
+        if (!state.localPlayerTurn) return false;
+        if (!state.localPlayerApplyTurnDelta) {
+            state.localPlayerApplyTurnDelta = PlaybackLocalPlayerApplyTurnDeltaHook::hook() == 0;
+        }
+        return state.localPlayerApplyTurnDelta;
     };
     auto removeAll = [&] {
+        if (state.localPlayerApplyTurnDelta && PlaybackLocalPlayerApplyTurnDeltaHook::unhook()) {
+            state.localPlayerApplyTurnDelta = false;
+        }
+        if (state.localPlayerTurn && PlaybackLocalPlayerTurnHook::unhook()) state.localPlayerTurn = false;
+        if (state.localPlayerNormalTick && PlaybackLocalPlayerNormalTickHook::unhook()) state.localPlayerNormalTick = false;
+        if (state.localPlayerFrameUpdate && PlaybackLocalPlayerFrameUpdateHook::unhook()) {
+            state.localPlayerFrameUpdate = false;
+        }
         if (state.levelTick && PlaybackClientLevelTickHook::unhook()) state.levelTick = false;
         if (state.update && PlaybackClientUpdateHook::unhook()) state.update = false;
         return noneInstalled();
@@ -99,9 +187,13 @@ bool hookClientTick(bool enable) {
 
         bool removed = removeAll();
         Playback::getInstance().getSelf().getLogger().error(
-            "Unable to install client tick hooks (update={}, levelTick={}, rollback={})",
+            "Unable to install client tick hooks (update={}, levelTick={}, frameUpdate={}, normalTick={}, turn={}, applyTurn={}, rollback={})",
             state.update,
             state.levelTick,
+            state.localPlayerFrameUpdate,
+            state.localPlayerNormalTick,
+            state.localPlayerTurn,
+            state.localPlayerApplyTurnDelta,
             removed
         );
         return false;
@@ -112,9 +204,13 @@ bool hookClientTick(bool enable) {
 
     bool restored = installAll();
     Playback::getInstance().getSelf().getLogger().error(
-        "Unable to remove client tick hooks (update={}, levelTick={}, restoration={})",
+        "Unable to remove client tick hooks (update={}, levelTick={}, frameUpdate={}, normalTick={}, turn={}, applyTurn={}, restoration={})",
         state.update,
         state.levelTick,
+        state.localPlayerFrameUpdate,
+        state.localPlayerNormalTick,
+        state.localPlayerTurn,
+        state.localPlayerApplyTurnDelta,
         restored
     );
     return false;

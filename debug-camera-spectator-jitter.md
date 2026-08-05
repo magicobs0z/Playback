@@ -55,3 +55,8 @@
 
 - 运行时复测表明，后置姿态写入不足以消除原生宿主状态覆盖。
 - 在 `LegacyClientNetworkHandler::handle(MovePlayerPacket)` 增加最终边界：仅拒绝回放注入、轨道接管有效、目标 runtime ID 为本地宿主且不处于维度迁移中的包；其他玩家、其他包、真实网络与维度迁移均放行。
+
+## 渲染帧权威姿态试验
+
+- 姿态提交移至 `LocalPlayer::frameUpdate` 原生调用返回后，确保每个渲染帧最后写入最新轨道姿态。
+- 轨道接管期间短路 `localPlayerTurn` 与 `_applyTurnDelta`，隔离本地鼠标旋转；暂停、维度迁移或无有效轨道时放行原生输入。

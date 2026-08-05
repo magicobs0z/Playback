@@ -126,6 +126,7 @@ struct SpectatorAbilityBackup {
 9. 轨道采样在回放 `_subTick` 后仅发布；宿主姿态在 `ClientInstance::$update` 的原生更新完成后应用，避免原生本地玩家状态回写覆盖轨道。
 10. 姿态应用动态校正 `Player::moveTo` 的位置读回偏移，保证写入后的宿主坐标与 Camera 关键帧坐标一致。
 11. `LegacyClientNetworkHandler::handle(MovePlayerPacket)` 在回放注入、轨道接管有效且目标是宿主时短路，禁止普通录制 GamePacket 进入宿主原生位置/旋转插值状态；维度迁移期间放行必要传送。
+12. 宿主姿态在 `LocalPlayer::frameUpdate` 原生调用结束后逐渲染帧提交；轨道接管期间短路本地 `localPlayerTurn` 和 `_applyTurnDelta`，暂停、无样本和维度迁移时自动恢复原生自由控制。
 
 ### 3.3 验证矩阵
 

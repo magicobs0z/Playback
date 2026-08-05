@@ -25,6 +25,7 @@ class LevelChunk;
 class LegacyClientNetworkHandler;
 class MinecraftScreenModel;
 class Actor;
+class LocalPlayer;
 class Player;
 enum class MinecraftPacketIds : int;
 
@@ -305,6 +306,21 @@ public:
     }
 
     [[nodiscard]] bool shouldRejectReplayHostMove(ActorRuntimeID runtimeId) const;
+
+    [[nodiscard]] bool isEditorCameraControlling(LocalPlayer const& player) const;
+
+    void debugReportCameraState(char const* point, LocalPlayer const& player) const;
+    void debugReportCameraSample(
+        std::string_view cameraId,
+        double           cameraTime,
+        int              firstKeyTick,
+        int              lastKeyTick,
+        float            x,
+        float            y,
+        float            z,
+        float            yaw,
+        float            pitch
+    ) const;
 
     [[nodiscard]] bool isIsolatingReplayWorld() const { return mActive; }
 

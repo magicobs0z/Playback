@@ -177,6 +177,21 @@ void EditorController::applyPreviewCamera() {
         mAppliedPreviewCameraId.clear();
         return;
     }
+    // #region debug-point D:camera-sample
+    int const firstKeyTick = camera->keys.empty() ? -1 : camera->keys.front().tick;
+    int const lastKeyTick  = camera->keys.empty() ? -1 : camera->keys.back().tick;
+    session.debugReportCameraSample(
+        camera->id,
+        session.getCameraTime(),
+        firstKeyTick,
+        lastKeyTick,
+        sample.position.x,
+        sample.position.y,
+        sample.position.z,
+        sample.rotation.x,
+        sample.rotation.y
+    );
+    // #endregion
     bool const snap = mAppliedPreviewCameraId != camera->id;
     session.setEditorCameraOverride(sample.position.x, sample.position.y, sample.position.z, sample.rotation.x, sample.rotation.y, sample.fov, snap);
     mAppliedPreviewCameraId = camera->id;

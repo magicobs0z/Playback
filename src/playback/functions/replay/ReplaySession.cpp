@@ -64,8 +64,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
@@ -75,7 +77,11 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+
+#include <windows.h>
+#include <winhttp.h>
 
 namespace playback::functions {
 
@@ -84,6 +90,50 @@ namespace {
 }
 
 namespace {
+
+// #region debug-point A:reporter
+void reportCameraPositionRebound(std::string payload) {
+    std::thread([payload = std::move(payload)] {
+        HINTERNET const internet = WinHttpOpen(
+            L"PlaybackCameraDebugger/1.0",
+            WINHTTP_ACCESS_TYPE_NO_PROXY,
+            WINHTTP_NO_PROXY_NAME,
+            WINHTTP_NO_PROXY_BYPASS,
+            0
+        );
+        if (!internet) return;
+        HINTERNET const connection = WinHttpConnect(internet, L"127.0.0.1", 7777, 0);
+        if (!connection) {
+            WinHttpCloseHandle(internet);
+            return;
+        }
+        HINTERNET const request = WinHttpOpenRequest(
+            connection,
+            L"POST",
+            L"/event",
+            nullptr,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            0
+        );
+        if (request) {
+            wchar_t const headers[] = L"Content-Type: application/json\r\n";
+            WinHttpSendRequest(
+                request,
+                headers,
+                static_cast<DWORD>(-1L),
+                payload.data() ? const_cast<char*>(payload.data()) : nullptr,
+                static_cast<DWORD>(payload.size()),
+                static_cast<DWORD>(payload.size()),
+                0
+            );
+            WinHttpCloseHandle(request);
+        }
+        WinHttpCloseHandle(connection);
+        WinHttpCloseHandle(internet);
+    }).detach();
+}
+// #endregion
 
 auto& getLogger() { return Playback::getInstance().getSelf().getLogger(); }
 
@@ -390,6 +440,80 @@ bool ReplaySession::shouldRejectReplayHostMove(ActorRuntimeID runtimeId) const {
     return mEditorCameraOverride.active && runtimeId == mReplayPlayer->getRuntimeID();
 }
 
+bool ReplaySession::isEditorCameraControlling(LocalPlayer const& player) const {
+    if (!mActive || mIsPaused || !mReplayWorldJoined || mPendingReplayDimension || mReplayPlayer != &player) return false;
+    std::scoped_lock lock(mEditorCameraOverrideMutex);
+    return mEditorCameraOverride.active;
+}
+
+void ReplaySession::debugReportCameraState(char const* point, LocalPlayer const& player) const {
+    // #region debug-point A:camera-state
+    static std::atomic_uint32_t samples{};
+    if (!mActive || !mReplayWorldJoined || mReplayPlayer != &player) return;
+    auto const state    = snapshotEditorCameraOverride();
+    if (!state.active || mIsPaused) return;
+    if (samples.fetch_add(1, std::memory_order_relaxed) >= 120) return;
+    auto const position = player.getPosition();
+    auto const rotation = player.getRotation();
+    char       payload[1024];
+    std::snprintf(
+        payload,
+        sizeof(payload),
+        "{\"sessionId\":\"camera-position-rebound\",\"runId\":\"pre-fix\",\"hypothesisId\":\"A\",\"location\":\"%s\",\"msg\":\"[DEBUG] local player camera state\",\"data\":{\"active\":%s,\"paused\":%s,\"pendingDimension\":%s,\"tick\":%d,\"targetX\":%.3f,\"targetY\":%.3f,\"targetZ\":%.3f,\"targetYaw\":%.3f,\"targetPitch\":%.3f,\"actualX\":%.3f,\"actualY\":%.3f,\"actualZ\":%.3f,\"actualPitch\":%.3f,\"actualYaw\":%.3f}}",
+        point,
+        state.active ? "true" : "false",
+        mIsPaused ? "true" : "false",
+        mPendingReplayDimension ? "true" : "false",
+        getCurrentTick(),
+        state.x,
+        state.y,
+        state.z,
+        state.yaw,
+        state.pitch,
+        position.x,
+        position.y,
+        position.z,
+        rotation.x,
+        rotation.y
+    );
+    reportCameraPositionRebound(payload);
+    // #endregion
+}
+
+void ReplaySession::debugReportCameraSample(
+    std::string_view cameraId,
+    double           cameraTime,
+    int              firstKeyTick,
+    int              lastKeyTick,
+    float            x,
+    float            y,
+    float            z,
+    float            yaw,
+    float            pitch
+) const {
+    // #region debug-point D:camera-sample
+    static std::atomic_uint32_t samples{};
+    if (!mActive || mIsPaused || samples.fetch_add(1, std::memory_order_relaxed) >= 60) return;
+    char payload[1024];
+    std::snprintf(
+        payload,
+        sizeof(payload),
+        "{\"sessionId\":\"camera-position-rebound\",\"runId\":\"pre-fix\",\"hypothesisId\":\"D\",\"location\":\"EditorController::applyPreviewCamera\",\"msg\":\"[DEBUG] camera sample published\",\"data\":{\"cameraId\":\"%.*s\",\"cameraTime\":%.3f,\"firstKeyTick\":%d,\"lastKeyTick\":%d,\"sampleX\":%.3f,\"sampleY\":%.3f,\"sampleZ\":%.3f,\"sampleYaw\":%.3f,\"samplePitch\":%.3f}}",
+        static_cast<int>(cameraId.size()),
+        cameraId.data(),
+        cameraTime,
+        firstKeyTick,
+        lastKeyTick,
+        x,
+        y,
+        z,
+        yaw,
+        pitch
+    );
+    reportCameraPositionRebound(payload);
+    // #endregion
+}
+
 void ReplaySession::applyEditorCameraOverride() {
     if (!mActive || mIsPaused || !mReplayWorldJoined || !mReplayPlayer) return;
 
@@ -415,6 +539,9 @@ void ReplaySession::applyEditorCameraOverride() {
         targetPosition.y - mEditorCameraMoveToOffsetY,
         targetPosition.z - mEditorCameraMoveToOffsetZ
     };
+    // #region debug-point A:before-move-to
+    debugReportCameraState("ReplaySession::applyEditorCameraOverride:before", *static_cast<LocalPlayer*>(mReplayPlayer));
+    // #endregion
     mReplayPlayer->moveTo(moveToPosition, rotation);
     if (!mEditorCameraMoveToOffsetCaptured) {
         auto const firstPosition = mReplayPlayer->getPosition();
@@ -436,6 +563,9 @@ void ReplaySession::applyEditorCameraOverride() {
         std::scoped_lock lock(mEditorCameraOverrideMutex);
         mEditorCameraOverride.snap = false;
     }
+    // #region debug-point A:after-move-to
+    debugReportCameraState("ReplaySession::applyEditorCameraOverride:after", *static_cast<LocalPlayer*>(mReplayPlayer));
+    // #endregion
 }
 
 void ReplaySession::restoreEditorCameraAbilities() {
