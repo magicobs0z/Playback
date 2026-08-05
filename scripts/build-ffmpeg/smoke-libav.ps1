@@ -1,4 +1,4 @@
-﻿# smoke-libav.ps1 — 编译并运行 smoke_libav.c（最小 libav 静态链接冒烟测试）。
+﻿﻿# smoke-libav.ps1 — 编译并运行 smoke_libav.c（最小 libav 静态链接冒烟测试）。
 #
 # 前置：third_party/ffmpeg 已由 build-ffmpeg.ps1 构建完成（含 include/lib 全套产物）。
 # 用法：  powershell -ExecutionPolicy Bypass -File scripts/build-ffmpeg/smoke-libav.ps1
